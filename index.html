@@ -2,10 +2,13 @@
 <!--
 =====================================================================
   AMC SIGNAL PRO  —  Forex Signal PWA
-  Version: v1.08
+  Version: v1.09
   Build   : 2026-09-19
 ---------------------------------------------------------------------
   CHANGELOG
+  v1.09  Database path prefix for Firebase mode (default "amc"), so
+         an existing Firebase project shared with other apps is not
+         collided with. Must match Fb_RootPath in the EA.
   v1.08  Default pair list widened from 5 to 10. No rule changed —
          this only grows the sample. Ten pairs refreshed hourly costs
          about 240 Twelve Data credits a day, well inside the free 800,
@@ -236,7 +239,7 @@ main{padding:0 0 24px}
 <header>
   <div class="brand">
     <h1><b>AMC</b> SIGNAL PRO</h1>
-    <span class="ver">v1.08</span>
+    <span class="ver">v1.09</span>
     <span class="spacer"></span>
     <span class="pill" id="srcPill">—</span>
   </div>
@@ -315,6 +318,11 @@ main{padding:0 0 24px}
         <label for="fTok">Database secret or ID token</label>
         <input id="fTok" type="password" placeholder="optional" autocomplete="off">
       </div>
+      <div class="field" data-src="fb">
+        <label for="fRoot">Database path prefix</label>
+        <input id="fRoot" type="text" value="amc" autocomplete="off" spellcheck="false">
+        <small>Must match Fb_RootPath in the EA. Keeps this app's data separate if the project is shared with your other tools. Blank reads from the root.</small>
+      </div>
 
       <div class="field">
         <label for="fBal">Virtual starting balance</label>
@@ -354,7 +362,7 @@ main{padding:0 0 24px}
       <button class="btn ghost" id="bFresh">Start fresh from today</button>
       <button class="btn ghost" id="bClear">Clear cached candles</button>
       <p class="foot" style="padding:20px 0 0">
-        AMC SIGNAL PRO v1.08 &middot; build 2026-09-19<br>
+        AMC SIGNAL PRO v1.09 &middot; build 2026-09-19<br>
         Informational only. Not financial advice.
       </p>
     </div>
@@ -385,7 +393,7 @@ main{padding:0 0 24px}
 
 <script>
 'use strict';
-const VERSION = 'v1.08';
+const VERSION = 'v1.09';
 const DEFAULT_PAIRS = ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD',
                        'USDCAD','USDCHF','NZDUSD','EURJPY','GBPJPY'];
 const LS = {
@@ -394,7 +402,7 @@ const LS = {
   gate:'amc.gate', filter:'amc.filter', credits:'amc.credits',
   cacheSig:'amc.cache.sig', cacheHist:'amc.cache.hist', cachePaper:'amc.cache.paper',
   bars:'amc.bars.', seen:'amc.seen',
-  vBal:'amc.v.bal', vRisk:'amc.v.risk', vCost:'amc.v.cost',
+  root:'amc.root', vBal:'amc.v.bal', vRisk:'amc.v.risk', vCost:'amc.v.cost',
   trackFrom:'amc.track.from', histWin:'amc.hist.win'
 };
 
@@ -759,7 +767,9 @@ async function fbGet(path){
   if(!url) throw new Error('No database URL set');
   const tok = get(LS.tok);
   const q = tok ? '?auth=' + encodeURIComponent(tok) : '';
-  const res = await fetch(url + '/' + path + '.json' + q, {cache:'no-store'});
+  const root = get(LS.root,'amc').replace(/^\/+|\/+$/g,'');
+  const full = url + (root ? '/' + root : '') + '/' + path + '.json' + q;
+  const res = await fetch(full, {cache:'no-store'});
   if(!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
@@ -1103,6 +1113,7 @@ $('#fKey').value   = get(LS.key);
 $('#fPairs').value = get(LS.pairs, DEFAULT_PAIRS.join(','));
 $('#fUrl').value   = get(LS.url);
 $('#fTok').value   = get(LS.tok);
+$('#fRoot').value  = get(LS.root,'amc');
 $('#fRefresh').value = get(LS.refresh,'3600');
 $('#fBal').value  = get(LS.vBal,'500');
 $('#fRisk').value = get(LS.vRisk,'1');
@@ -1135,6 +1146,7 @@ $('#bSave').onclick = () => {
   set(LS.pairs, $('#fPairs').value.trim());
   set(LS.url, $('#fUrl').value.trim());
   set(LS.tok, $('#fTok').value.trim());
+  set(LS.root, $('#fRoot').value.trim());
   set(LS.refresh, $('#fRefresh').value);
   set(LS.vBal,  $('#fBal').value);
   set(LS.vRisk, $('#fRisk').value);
@@ -1149,6 +1161,7 @@ $('#bTest').onclick = async () => {
   if(src === 'demo') return toast('Demo mode needs no connection.');
   if(src === 'fb'){
     set(LS.url, $('#fUrl').value.trim()); set(LS.tok, $('#fTok').value.trim());
+    set(LS.root, $('#fRoot').value.trim());
     try{
       const d = await fbGet('signals');
       toast(d ? 'Connected. ' + Object.keys(d).length + ' pairs found.' : 'Connected, /signals is empty.');
