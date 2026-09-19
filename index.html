@@ -2,10 +2,15 @@
 <!--
 =====================================================================
   AMC SIGNAL PRO  —  Forex Signal PWA
-  Version: v1.07
+  Version: v1.08
   Build   : 2026-09-19
 ---------------------------------------------------------------------
   CHANGELOG
+  v1.08  Default pair list widened from 5 to 10. No rule changed —
+         this only grows the sample. Ten pairs refreshed hourly costs
+         about 240 Twelve Data credits a day, well inside the free 800,
+         and one scan takes roughly 75 seconds because of the
+         8-requests-per-minute limit.
   v1.07  Forward tracking, counts grid and a virtual account.
          - History defaults to "Since <date>" — only trades that
            closed after you started tracking. Toggle to see the full
@@ -231,7 +236,7 @@ main{padding:0 0 24px}
 <header>
   <div class="brand">
     <h1><b>AMC</b> SIGNAL PRO</h1>
-    <span class="ver">v1.07</span>
+    <span class="ver">v1.08</span>
     <span class="spacer"></span>
     <span class="pill" id="srcPill">—</span>
   </div>
@@ -298,8 +303,8 @@ main{padding:0 0 24px}
       </div>
       <div class="field" data-src="td">
         <label for="fPairs">Pairs to scan</label>
-        <input id="fPairs" type="text" value="XAUUSD,EURUSD,GBPUSD,USDJPY,AUDUSD" autocomplete="off" spellcheck="false">
-        <small>One credit per pair per refresh. Five pairs refreshed hourly uses about 120 credits a day.</small>
+        <input id="fPairs" type="text" value="XAUUSD,EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD,USDCHF,NZDUSD,EURJPY,GBPJPY" autocomplete="off" spellcheck="false">
+        <small>One credit per pair per refresh. Ten pairs refreshed hourly uses about 240 credits a day, and one scan takes around 75 seconds because of the 8-per-minute limit.</small>
       </div>
 
       <div class="field" data-src="fb">
@@ -349,7 +354,7 @@ main{padding:0 0 24px}
       <button class="btn ghost" id="bFresh">Start fresh from today</button>
       <button class="btn ghost" id="bClear">Clear cached candles</button>
       <p class="foot" style="padding:20px 0 0">
-        AMC SIGNAL PRO v1.07 &middot; build 2026-09-19<br>
+        AMC SIGNAL PRO v1.08 &middot; build 2026-09-19<br>
         Informational only. Not financial advice.
       </p>
     </div>
@@ -380,8 +385,9 @@ main{padding:0 0 24px}
 
 <script>
 'use strict';
-const VERSION = 'v1.07';
-const DEFAULT_PAIRS = ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD'];
+const VERSION = 'v1.08';
+const DEFAULT_PAIRS = ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD',
+                       'USDCAD','USDCHF','NZDUSD','EURJPY','GBPJPY'];
 const LS = {
   src:'amc.src', key:'amc.key', pairs:'amc.pairs',
   url:'amc.url', tok:'amc.tok', notify:'amc.notify', refresh:'amc.refresh',
@@ -784,7 +790,8 @@ async function syncFirebase(silent){
 /* ================= demo ================= */
 function demoData(){
   const base = {XAUUSD:3410.50,EURUSD:1.0865,GBPUSD:1.2710,USDJPY:151.40,
-                AUDUSD:0.6605,USDCAD:1.3620,USDCHF:0.8815,NZDUSD:0.6010};
+                AUDUSD:0.6605,USDCAD:1.3620,USDCHF:0.8815,NZDUSD:0.6010,
+                EURJPY:164.50,GBPJPY:192.30};
   const acts = ['BUY','SELL','EXIT','FLAT'];
   const pairs = pairList();
   const sigs = {}, hist = [];
