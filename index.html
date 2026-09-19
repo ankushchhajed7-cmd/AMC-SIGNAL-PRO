@@ -2,24 +2,23 @@
 <!--
 =====================================================================
   AMC SIGNAL PRO  —  Forex Signal PWA
-  Version: v1.03
+  Version: v1.04
   Build   : 2026-09-19
 ---------------------------------------------------------------------
   CHANGELOG
-  v1.03  Flat repo layout — every file sits in the repository root, no
-         icons/ subfolder. Fixes the manifest icon 404 that stopped
-         Chrome from offering "Install app".
-  v1.02  Icon switched to a text-based SVG (superseded by v1.03).
-  v1.01  Renamed to AMC SIGNAL PRO (was "Signal Desk").
-         - Brand lockup in header, manifest, service worker cache
-         - localStorage keys re-prefixed sd.* -> amc.*
-         - Disclaimer re-shows once on this version
-  v1.00  First build.
-         - BUY / SELL / EXIT signal feed (Firebase Realtime DB, REST)
-         - Demo mode so the app runs before the engine exists
-         - History tab with win rate / profit factor / expectancy
-         - Settings: DB URL + token stored on device, never in repo
-         - Risk disclaimer gate, offline cache, install prompt
+  v1.04  Twelve Data signal engine, running on the device.
+         - One /time_series request per pair (H1 candles, 2000 bars)
+         - H4 and D1 built locally from the H1 series — no extra credits
+         - EMA20/50/200, RSI14, ATR14, ADX14 all computed in JS
+         - State machine walked over the whole window: the last open
+           trade becomes the live signal, closed ones fill History
+         - Credit meter (x / 800, resets midnight UTC), 8/min throttle
+         - Candle cache so a reload does not burn credits
+         - API key stored on the device only, never in the repo
+  v1.03  Flat repo layout — every file in the repository root.
+  v1.02  Text-based SVG icon (superseded by v1.03).
+  v1.01  Renamed to AMC SIGNAL PRO.
+  v1.00  First build: BUY/SELL/EXIT feed, demo mode, Firebase reader.
 ---------------------------------------------------------------------
   Single file. Vanilla JS. No build step. GitHub Pages ready.
 =====================================================================
@@ -36,17 +35,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
 :root{
-  --ink:#0E1116;
-  --ink2:#151A21;
-  --ink3:#1C232C;
-  --line:#242C38;
-  --amber:#F0B429;
-  --amber-dim:#8A6A1C;
-  --buy:#2DD4A7;
-  --sell:#FF5C5C;
-  --exit:#8B96A5;
-  --text:#E6EAF0;
-  --muted:#79838F;
+  --ink:#0E1116; --ink2:#151A21; --ink3:#1C232C; --line:#242C38;
+  --amber:#F0B429; --amber-dim:#8A6A1C;
+  --buy:#2DD4A7; --sell:#FF5C5C; --exit:#8B96A5;
+  --text:#E6EAF0; --muted:#79838F;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --mono:ui-monospace,"SF Mono","Roboto Mono","DejaVu Sans Mono",monospace;
   --bar:60px;
@@ -62,7 +54,6 @@ body{
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 
-/* ---------- header ---------- */
 header{
   position:sticky;top:0;z-index:40;background:var(--ink);
   border-bottom:1px solid var(--line);
@@ -80,53 +71,38 @@ header{
 .pill.live{color:var(--buy);border-color:#1E4E43}
 .pill.demo{color:var(--amber);border-color:var(--amber-dim)}
 .pill.off{color:var(--sell);border-color:#5A2626}
+.pill.busy{color:var(--amber);border-color:var(--amber-dim)}
 
-/* ---------- ticker strip (hero) ---------- */
-.strip{
-  display:flex;gap:0;border-bottom:1px solid var(--line);
-  background:linear-gradient(180deg,#131820,#0E1116);
-}
-.strip div{
-  flex:1;padding:11px 8px 12px;text-align:center;
-  border-right:1px solid var(--line);
-}
+.strip{display:flex;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#131820,#0E1116)}
+.strip div{flex:1;padding:11px 8px 12px;text-align:center;border-right:1px solid var(--line)}
 .strip div:last-child{border-right:0}
 .strip b{display:block;font-family:var(--mono);font-size:19px;font-weight:600;line-height:1.1}
 .strip span{display:block;font-size:10.5px;color:var(--muted);margin-top:3px}
 .s-buy b{color:var(--buy)} .s-sell b{color:var(--sell)} .s-flat b{color:var(--exit)}
 
-/* ---------- tabs ---------- */
 nav.tabs{display:flex;padding:0 6px;gap:2px}
-nav.tabs button{
-  padding:11px 12px 9px;font-size:13.5px;color:var(--muted);
-  border-bottom:2px solid transparent;
-}
+nav.tabs button{padding:11px 12px 9px;font-size:13.5px;color:var(--muted);
+  border-bottom:2px solid transparent}
 nav.tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--amber)}
 
-/* ---------- pair filter ---------- */
+.bar{height:2px;background:var(--line);position:relative;overflow:hidden}
+.bar i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--amber);transition:width .25s}
+
 .filters{display:flex;gap:6px;overflow-x:auto;padding:10px 16px;scrollbar-width:none}
 .filters::-webkit-scrollbar{display:none}
-.chip{
-  flex:0 0 auto;font-family:var(--mono);font-size:11px;padding:5px 10px;
-  border:1px solid var(--line);border-radius:14px;color:var(--muted);
-}
+.chip{flex:0 0 auto;font-family:var(--mono);font-size:11px;padding:5px 10px;
+  border:1px solid var(--line);border-radius:14px;color:var(--muted)}
 .chip[aria-pressed="true"]{color:var(--ink);background:var(--amber);border-color:var(--amber);font-weight:600}
 
-/* ---------- signal row ---------- */
 main{padding:0 0 24px}
-.row{
-  display:block;position:relative;padding:13px 16px 14px 19px;
-  border-bottom:1px solid var(--line);
-}
+.row{display:block;position:relative;padding:13px 16px 14px 19px;border-bottom:1px solid var(--line)}
 .row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--exit)}
 .row.buy::before{background:var(--buy)}
 .row.sell::before{background:var(--sell)}
-.row.exit::before{background:var(--exit)}
 .row-top{display:flex;align-items:center;gap:9px}
 .pair{font-family:var(--mono);font-size:16px;font-weight:650;letter-spacing:-.02em}
-.act{
-  font-size:11px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:.03em;
-}
+.act{font-size:11px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:.03em}
 .buy .act{background:rgba(45,212,167,.14);color:var(--buy)}
 .sell .act{background:rgba(255,92,92,.14);color:var(--sell)}
 .exit .act{background:rgba(139,150,165,.16);color:var(--exit)}
@@ -140,69 +116,59 @@ main{padding:0 0 24px}
 .meta{margin-top:9px;font-size:11.5px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap}
 .meta em{font-style:normal;font-family:var(--mono);color:#A8B2BE}
 
-/* ---------- history ---------- */
 .hrow{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
 .hrow .pair{font-size:13.5px}
 .hrow .res{margin-left:auto;font-family:var(--mono);font-size:13.5px;font-weight:600}
 .win{color:var(--buy)} .loss{color:var(--sell)} .be{color:var(--exit)}
 .hmeta{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
 
-/* ---------- stats ---------- */
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);margin:0 0 2px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)}
 .stats div{background:var(--ink);padding:13px 16px}
 .stats b{display:block;font-family:var(--mono);font-size:21px;font-weight:600;line-height:1.15}
 .stats span{font-size:11px;color:var(--muted)}
 .note{padding:12px 16px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line);line-height:1.5}
 
-/* ---------- settings ---------- */
 .form{padding:16px}
 .field{margin-bottom:16px}
 .field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px}
-.field input,.field select{
-  width:100%;padding:11px 12px;background:var(--ink2);border:1px solid var(--line);
-  border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;
-}
+.field input,.field select{width:100%;padding:11px 12px;background:var(--ink2);
+  border:1px solid var(--line);border-radius:6px;color:var(--text);
+  font-family:var(--mono);font-size:13px}
 .field input:focus,.field select:focus{outline:2px solid var(--amber);outline-offset:-1px}
 .field small{display:block;margin-top:5px;font-size:11px;color:var(--muted);line-height:1.5}
-.btn{
-  display:block;width:100%;padding:13px;border-radius:6px;font-weight:600;font-size:14.5px;
-  background:var(--amber);color:#1A1204;
-}
+.credit{display:flex;justify-content:space-between;align-items:baseline;
+  padding:12px 16px;border-bottom:1px solid var(--line)}
+.credit b{font-family:var(--mono);font-size:16px}
+.credit span{font-size:11.5px;color:var(--muted)}
+.btn{display:block;width:100%;padding:13px;border-radius:6px;font-weight:600;
+  font-size:14.5px;background:var(--amber);color:#1A1204}
 .btn.ghost{background:none;border:1px solid var(--line);color:var(--text);font-weight:500}
 .btn+.btn{margin-top:9px}
 .toggle{display:flex;align-items:center;justify-content:space-between;
   padding:13px 0;border-bottom:1px solid var(--line)}
 .toggle span{font-size:14px}
 .sw{width:44px;height:25px;border-radius:13px;background:var(--ink3);position:relative;flex:0 0 auto}
-.sw::after{content:"";position:absolute;top:3px;left:3px;width:19px;height:19px;border-radius:50%;
-  background:var(--muted);transition:transform .16s,background .16s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:19px;height:19px;
+  border-radius:50%;background:var(--muted);transition:transform .16s,background .16s}
 .sw[aria-pressed="true"]{background:var(--amber-dim)}
 .sw[aria-pressed="true"]::after{transform:translateX(19px);background:var(--amber)}
 
-/* ---------- empty / toast ---------- */
 .empty{padding:56px 28px;text-align:center;color:var(--muted);font-size:13.5px;line-height:1.6}
 .empty b{display:block;color:var(--text);font-size:15px;font-weight:600;margin-bottom:7px}
-.toast{
-  position:fixed;left:50%;bottom:calc(var(--bar) + 18px);transform:translate(-50%,14px);
+.toast{position:fixed;left:50%;bottom:calc(var(--bar) + 18px);transform:translate(-50%,14px);
   background:var(--ink3);border:1px solid var(--line);padding:10px 16px;border-radius:6px;
-  font-size:13px;opacity:0;pointer-events:none;transition:.2s;z-index:60;max-width:88vw;
-}
+  font-size:13px;opacity:0;pointer-events:none;transition:.2s;z-index:60;max-width:88vw}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 
-/* ---------- bottom bar ---------- */
-.bottom{
-  position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--ink2);
-  border-top:1px solid var(--line);display:flex;
-  padding-bottom:env(safe-area-inset-bottom);
-}
+.bottom{position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--ink2);
+  border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
 .bottom button{flex:1;padding:9px 0 8px;font-size:10.5px;color:var(--muted);text-align:center}
 .bottom button[aria-selected="true"]{color:var(--amber)}
 .bottom svg{display:block;margin:0 auto 3px;width:21px;height:21px;
   fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 
-/* ---------- disclaimer gate ---------- */
 .gate{position:fixed;inset:0;z-index:100;background:rgba(6,8,11,.94);
-  display:flex;align-items:flex-end;padding:0}
+  display:flex;align-items:flex-end}
 .gate.hide{display:none}
 .gate-in{background:var(--ink2);border-top:2px solid var(--amber);width:100%;
   max-height:88vh;overflow-y:auto;padding:22px 20px calc(22px + env(safe-area-inset-bottom))}
@@ -218,7 +184,7 @@ main{padding:0 0 24px}
 <header>
   <div class="brand">
     <h1><b>AMC</b> SIGNAL PRO</h1>
-    <span class="ver">v1.03</span>
+    <span class="ver">v1.04</span>
     <span class="spacer"></span>
     <span class="pill" id="srcPill">—</span>
   </div>
@@ -233,16 +199,15 @@ main{padding:0 0 24px}
     <button role="tab" data-tab="history" aria-selected="false">History</button>
     <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
   </nav>
+  <div class="bar"><i id="prog"></i></div>
 </header>
 
 <main>
-  <!-- LIVE -->
   <section id="v-live">
     <div class="filters" id="filters"></div>
     <div id="liveList"></div>
   </section>
 
-  <!-- HISTORY -->
   <section id="v-history" hidden>
     <div class="stats">
       <div><b class="num" id="sTrades">0</b><span>Closed trades</span></div>
@@ -250,38 +215,59 @@ main{padding:0 0 24px}
       <div><b class="num" id="sPF">—</b><span>Profit factor</span></div>
       <div><b class="num" id="sExp">—</b><span>Expectancy (R)</span></div>
     </div>
-    <p class="note">Win rate alone doesn't tell you if a system makes money. Profit factor above 1.2 and positive expectancy matter more. Under 100 closed trades, treat every number here as noise.</p>
+    <p class="note" id="histNote">Simulated from downloaded candles. No spread, commission or slippage applied.</p>
     <div id="histList"></div>
   </section>
 
-  <!-- SETTINGS -->
   <section id="v-settings" hidden>
+    <div class="credit">
+      <div>
+        <b class="num" id="cUsed">0</b><span class="num"> / 800 credits</span>
+        <span><br>Twelve Data, resets midnight UTC</span>
+      </div>
+      <span class="num" id="cReset">—</span>
+    </div>
+
     <div class="form">
       <div class="field">
+        <label for="fSrc">Signal source</label>
+        <select id="fSrc">
+          <option value="demo">Demo — fake signals, no network</option>
+          <option value="td">Twelve Data — live candles, engine on device</option>
+          <option value="fb">Firebase — signals pushed by my MT5 engine</option>
+        </select>
+      </div>
+
+      <div class="field" data-src="td">
+        <label for="fKey">Twelve Data API key</label>
+        <input id="fKey" type="password" placeholder="paste your key" autocomplete="off" spellcheck="false">
+        <small>Free key from twelvedata.com. Stored on this device only — never written to the repo.</small>
+      </div>
+      <div class="field" data-src="td">
+        <label for="fPairs">Pairs to scan</label>
+        <input id="fPairs" type="text" value="XAUUSD,EURUSD,GBPUSD,USDJPY,AUDUSD" autocomplete="off" spellcheck="false">
+        <small>One credit per pair per refresh. Five pairs refreshed hourly uses about 120 credits a day.</small>
+      </div>
+
+      <div class="field" data-src="fb">
         <label for="fUrl">Firebase database URL</label>
         <input id="fUrl" type="url" placeholder="https://your-project.firebaseio.com" autocomplete="off" spellcheck="false">
-        <small>Saved on this device only. Never committed to the repo.</small>
       </div>
-      <div class="field">
+      <div class="field" data-src="fb">
         <label for="fTok">Database secret or ID token</label>
         <input id="fTok" type="password" placeholder="optional" autocomplete="off">
-        <small>Leave blank if your database read rules are public.</small>
       </div>
+
       <div class="field">
         <label for="fRefresh">Auto refresh</label>
         <select id="fRefresh">
           <option value="0">Off</option>
-          <option value="30">Every 30 seconds</option>
-          <option value="60" selected>Every 60 seconds</option>
-          <option value="300">Every 5 minutes</option>
+          <option value="900">Every 15 minutes</option>
+          <option value="1800">Every 30 minutes</option>
+          <option value="3600" selected>Every hour</option>
         </select>
+        <small>The engine works on closed H1 candles, so refreshing faster than hourly just spends credits.</small>
       </div>
-
-      <div class="toggle">
-        <span>Demo mode</span>
-        <button class="sw" id="tDemo" aria-pressed="true" aria-label="Demo mode"></button>
-      </div>
-      <p class="note" style="border:0;padding:10px 0 4px">Demo mode generates fake signals on this device so you can test the app before the signal engine is connected. Nothing here is tradeable.</p>
 
       <div class="toggle">
         <span>Alert on new signal</span>
@@ -292,9 +278,9 @@ main{padding:0 0 24px}
       <button class="btn" id="bSave">Save settings</button>
       <button class="btn ghost" id="bTest">Test connection</button>
       <button class="btn ghost" id="bInstall" hidden>Install app</button>
-      <button class="btn ghost" id="bClear">Clear cached data</button>
+      <button class="btn ghost" id="bClear">Clear cached candles</button>
       <p class="foot" style="padding:20px 0 0">
-        AMC SIGNAL PRO v1.03 &middot; build 2026-09-19<br>
+        AMC SIGNAL PRO v1.04 &middot; build 2026-09-19<br>
         Informational only. Not financial advice.
       </p>
     </div>
@@ -315,8 +301,8 @@ main{padding:0 0 24px}
     <h2>Before you use this app</h2>
     <p class="hard">Trading forex and CFDs carries a high level of risk and can result in the loss of all your capital. A large majority of retail accounts lose money.</p>
     <p>AMC SIGNAL PRO shows information only. It is not investment advice, not a recommendation, and not a solicitation to buy or sell anything. Every trading decision is yours.</p>
-    <p>The developer is not a registered investment adviser and is not registered with SEBI, FCA, ASIC or any other regulator.</p>
-    <p>No claim is made that this app will produce profits. Past performance, including any backtest shown, does not indicate future results.</p>
+    <p>Signals are calculated from delayed third-party candle data, not from broker prices. Always check the live price and spread with your broker before acting.</p>
+    <p>The developer is not a registered investment adviser and is not registered with SEBI, FCA, ASIC or any other regulator. Past performance, including any simulated result shown in this app, does not indicate future results.</p>
     <button class="btn" id="bAccept" style="margin-top:8px">I understand and accept</button>
   </div>
 </div>
@@ -325,308 +311,651 @@ main{padding:0 0 24px}
 
 <script>
 'use strict';
-const VERSION = 'v1.03';
-const PAIRS = ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','USDCHF','NZDUSD','EURJPY','GBPJPY'];
+const VERSION = 'v1.04';
+const DEFAULT_PAIRS = ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD'];
 const LS = {
-  url:'amc.url', tok:'amc.tok', demo:'amc.demo', notify:'amc.notify',
-  refresh:'amc.refresh', gate:'amc.gate', filter:'amc.filter',
-  cacheSig:'amc.cache.sig', cacheHist:'amc.cache.hist', seen:'amc.seen'
+  src:'amc.src', key:'amc.key', pairs:'amc.pairs',
+  url:'amc.url', tok:'amc.tok', notify:'amc.notify', refresh:'amc.refresh',
+  gate:'amc.gate', filter:'amc.filter', credits:'amc.credits',
+  cacheSig:'amc.cache.sig', cacheHist:'amc.cache.hist',
+  bars:'amc.bars.', seen:'amc.seen'
+};
+
+/* ---- engine parameters ---- */
+const P = {
+  barsToFetch: 2000,
+  emaFast: 20, emaBias1: 50, emaBias2: 200,
+  rsiLen: 14, rsiLong: 45, rsiShort: 55,
+  atrLen: 14, atrAvgLen: 50, atrFloor: 0.7,
+  adxLen: 14, adxMin: 22,
+  slAtr: 1.5, tpAtr: 2.5,
+  sessionFrom: 7, sessionTo: 16,
+  timeStopBars: 48
 };
 
 const $  = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const get = (k,d='') => localStorage.getItem(k) ?? d;
 const set = (k,v) => localStorage.setItem(k,v);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-let state = { signals:{}, history:[], filter:get(LS.filter,'ALL'), timer:null, lastSync:0 };
+let state = { signals:{}, history:[], filter:get(LS.filter,'ALL'),
+              timer:null, lastSync:0, busy:false };
 
-/* ---------------- helpers ---------------- */
+/* ================= helpers ================= */
+function pairList(){
+  return get(LS.pairs, DEFAULT_PAIRS.join(','))
+    .split(',').map(s=>s.trim().toUpperCase()).filter(Boolean).slice(0,12);
+}
 function digits(pair){ return pair.includes('JPY') ? 3 : (pair.startsWith('XAU') ? 2 : 5); }
 function fmt(pair,v){ return (v==null||isNaN(v)) ? '—' : Number(v).toFixed(digits(pair)); }
+function tdSymbol(p){ return p.slice(0,3) + '/' + p.slice(3); }
 function ago(ts){
   if(!ts) return '—';
   const s = Math.max(0, Math.floor(Date.now()/1000 - ts));
-  if(s < 60)    return s + 's';
-  if(s < 3600)  return Math.floor(s/60) + 'm';
+  if(s < 60) return s + 's';
+  if(s < 3600) return Math.floor(s/60) + 'm';
   if(s < 86400) return Math.floor(s/3600) + 'h';
   return Math.floor(s/86400) + 'd';
 }
-function rr(s){
-  if(!s || s.action==='EXIT') return null;
-  const risk = Math.abs(s.entry - s.sl), rew = Math.abs(s.tp - s.entry);
-  if(!risk || !rew) return null;
-  return (rew/risk).toFixed(2);
-}
-function el_notifyFail(m){ $('#tNotify').setAttribute('aria-pressed','false'); set(LS.notify,'0'); toast(m); }
 function toast(msg){
   const t = $('#toast'); t.textContent = msg; t.classList.add('on');
-  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('on'), 2400);
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('on'), 3200);
 }
+function progress(v){ $('#prog').style.width = (v*100) + '%'; }
 
-/* ---------------- rendering ---------------- */
-function renderFilters(){
-  const wrap = $('#filters');
-  const list = ['ALL', ...PAIRS];
-  wrap.innerHTML = list.map(p =>
-    `<button class="chip" data-p="${p}" aria-pressed="${state.filter===p}">${p}</button>`).join('');
-  wrap.onclick = e => {
-    const b = e.target.closest('.chip'); if(!b) return;
-    state.filter = b.dataset.p; set(LS.filter, state.filter);
-    renderFilters(); renderLive();
+/* ================= indicators ================= */
+function ema(vals, len){
+  const out = new Array(vals.length).fill(null);
+  if(vals.length < len) return out;
+  let sum = 0;
+  for(let i=0;i<len;i++) sum += vals[i];
+  let prev = sum/len; out[len-1] = prev;
+  const k = 2/(len+1);
+  for(let i=len;i<vals.length;i++){ prev = vals[i]*k + prev*(1-k); out[i] = prev; }
+  return out;
+}
+function rsi(closes, len){
+  const out = new Array(closes.length).fill(null);
+  if(closes.length <= len) return out;
+  let g=0, l=0;
+  for(let i=1;i<=len;i++){ const d = closes[i]-closes[i-1]; if(d>0) g+=d; else l-=d; }
+  g/=len; l/=len;
+  out[len] = l===0 ? 100 : 100 - 100/(1 + g/l);
+  for(let i=len+1;i<closes.length;i++){
+    const d = closes[i]-closes[i-1];
+    g = (g*(len-1) + (d>0? d:0))/len;
+    l = (l*(len-1) + (d<0? -d:0))/len;
+    out[i] = l===0 ? 100 : 100 - 100/(1 + g/l);
+  }
+  return out;
+}
+function atr(b, len){
+  const out = new Array(b.length).fill(null);
+  if(b.length <= len) return out;
+  const tr = [0];
+  for(let i=1;i<b.length;i++)
+    tr.push(Math.max(b[i].h-b[i].l, Math.abs(b[i].h-b[i-1].c), Math.abs(b[i].l-b[i-1].c)));
+  let s=0; for(let i=1;i<=len;i++) s += tr[i];
+  let prev = s/len; out[len] = prev;
+  for(let i=len+1;i<b.length;i++){ prev = (prev*(len-1) + tr[i])/len; out[i] = prev; }
+  return out;
+}
+function sma(arr, len){
+  const out = new Array(arr.length).fill(null);
+  let sum=0, q=[];
+  for(let i=0;i<arr.length;i++){
+    const v = arr[i];
+    if(v==null){ out[i]=null; continue; }
+    q.push(v); sum+=v;
+    if(q.length>len) sum -= q.shift();
+    if(q.length===len) out[i] = sum/len;
+  }
+  return out;
+}
+function adx(b, len){
+  const n = b.length, out = new Array(n).fill(null);
+  if(n < len*2 + 2) return out;
+  const tr=[], pdm=[], ndm=[];
+  for(let i=1;i<n;i++){
+    const up = b[i].h - b[i-1].h, dn = b[i-1].l - b[i].l;
+    pdm.push(up>dn && up>0 ? up : 0);
+    ndm.push(dn>up && dn>0 ? dn : 0);
+    tr.push(Math.max(b[i].h-b[i].l, Math.abs(b[i].h-b[i-1].c), Math.abs(b[i].l-b[i-1].c)));
+  }
+  let trS=0, pS=0, nS=0;
+  for(let i=0;i<len;i++){ trS+=tr[i]; pS+=pdm[i]; nS+=ndm[i]; }
+  const dx = [];
+  const pushDX = () => {
+    const pdi = trS ? 100*pS/trS : 0, ndi = trS ? 100*nS/trS : 0;
+    dx.push((pdi+ndi)===0 ? 0 : 100*Math.abs(pdi-ndi)/(pdi+ndi));
   };
+  pushDX();
+  for(let i=len;i<tr.length;i++){
+    trS = trS - trS/len + tr[i];
+    pS  = pS  - pS/len  + pdm[i];
+    nS  = nS  - nS/len  + ndm[i];
+    pushDX();
+  }
+  let s=0; for(let i=0;i<len;i++) s += dx[i];
+  let prev = s/len;
+  out[2*len - 1] = prev;
+  for(let i=len;i<dx.length;i++){
+    prev = (prev*(len-1) + dx[i])/len;
+    out[i + len] = prev;
+  }
+  return out;
 }
 
-function renderLive(){
-  const all = Object.entries(state.signals)
-    .map(([pair,s]) => ({pair, ...s}))
-    .filter(s => state.filter==='ALL' || s.pair===state.filter)
-    .sort((a,b) => (b.ts||0) - (a.ts||0));
+/* ================= timeframe aggregation ================= */
+function aggregate(bars, seconds){
+  const out = [];
+  let cur = null, key = null;
+  for(const b of bars){
+    const k = Math.floor(b.t / seconds);
+    if(k !== key){
+      if(cur) out.push(cur);
+      cur = {t: k*seconds, o:b.o, h:b.h, l:b.l, c:b.c};
+      key = k;
+    } else {
+      cur.h = Math.max(cur.h, b.h);
+      cur.l = Math.min(cur.l, b.l);
+      cur.c = b.c;
+    }
+  }
+  if(cur) out.push(cur);
+  return out;
+}
+function mapToHTF(bars, htf, seconds){
+  const map = new Array(bars.length).fill(-1);
+  let j = -1;
+  for(let i=0;i<bars.length;i++){
+    while(j+1 < htf.length && htf[j+1].t + seconds <= bars[i].t) j++;
+    map[i] = j;
+  }
+  return map;
+}
 
-  let buy=0, sell=0, flat=0;
-  Object.values(state.signals).forEach(s=>{
-    if(s.action==='BUY') buy++; else if(s.action==='SELL') sell++; else flat++;
-  });
-  $('#cBuy').textContent = buy;
-  $('#cSell').textContent = sell;
-  $('#cFlat').textContent = flat;
-  $('#cAge').textContent = state.lastSync ? ago(state.lastSync) : '—';
+/* ================= the signal engine ================= */
+function runEngine(pair, bars){
+  if(bars.length < 900) return {live:null, closed:[]};
 
-  const box = $('#liveList');
-  if(!all.length){
-    box.innerHTML = `<div class="empty"><b>No signals yet</b>
-      Connect your signal engine in Settings, or switch Demo mode on to see how the feed looks.</div>`;
+  const closes = bars.map(b => b.c);
+  const e20  = ema(closes, P.emaFast);
+  const r14  = rsi(closes, P.rsiLen);
+  const a14  = atr(bars, P.atrLen);
+  const aAvg = sma(a14, P.atrAvgLen);
+
+  const H4 = 4*3600, D1 = 24*3600;
+  const h4 = aggregate(bars, H4), d1 = aggregate(bars, D1);
+  const h4c = h4.map(b => b.c);
+  const e50  = ema(h4c, P.emaBias1);
+  const e200 = ema(h4c, P.emaBias2);
+  const adxD = adx(d1, P.adxLen);
+  const mH4 = mapToHTF(bars, h4, H4);
+  const mD1 = mapToHTF(bars, d1, D1);
+
+  const biasAt = i => {
+    const j = mH4[i];
+    if(j < 0 || e50[j]==null || e200[j]==null) return 0;
+    return e50[j] > e200[j] ? 1 : -1;
+  };
+  const adxAt = i => {
+    const j = mD1[i];
+    return (j < 0 || adxD[j]==null) ? null : adxD[j];
+  };
+  const inSession = t => {
+    const h = new Date(t*1000).getUTCHours();
+    return h >= P.sessionFrom && h < P.sessionTo;
+  };
+
+  const closed = [];
+  let pos = null;
+
+  for(let i = 260; i < bars.length; i++){
+    const b = bars[i];
+
+    if(pos){
+      const dir = pos.dir;
+      const hitSL = dir===1 ? b.l <= pos.sl : b.h >= pos.sl;
+      const hitTP = dir===1 ? b.h >= pos.tp : b.l <= pos.tp;
+      let exitPx = null, why = null;
+      if(hitSL){ exitPx = pos.sl; why = 'SL'; }
+      else if(hitTP){ exitPx = pos.tp; why = 'TP'; }
+      else if(biasAt(i) === -dir){ exitPx = b.c; why = 'Bias flip'; }
+      else if(i - pos.i >= P.timeStopBars){ exitPx = b.c; why = 'Time stop'; }
+
+      if(exitPx != null){
+        closed.push({
+          pair, action: dir===1 ? 'BUY' : 'SELL',
+          entry: pos.entry, exit: exitPx, reason: why,
+          r: +(((exitPx - pos.entry) * dir) / pos.risk).toFixed(2),
+          openTs: pos.t, closeTs: b.t
+        });
+        pos = null;
+      }
+      continue;
+    }
+
+    const a = a14[i], av = aAvg[i], rNow = r14[i], rPrev = r14[i-1];
+    const e = e20[i], ad = adxAt(i), bias = biasAt(i);
+    if(a==null || av==null || rNow==null || rPrev==null || e==null || ad==null || !bias) continue;
+    if(ad < P.adxMin) continue;
+    if(a < P.atrFloor * av) continue;
+    if(!inSession(b.t)) continue;
+
+    let dir = 0;
+    if(bias === 1 && b.l <= e && b.c > e && rPrev < P.rsiLong && rNow >= P.rsiLong) dir = 1;
+    if(bias === -1 && b.h >= e && b.c < e && rPrev > P.rsiShort && rNow <= P.rsiShort) dir = -1;
+    if(!dir) continue;
+
+    pos = {
+      i, t: b.t, dir, entry: b.c,
+      sl: b.c - dir * P.slAtr * a,
+      tp: b.c + dir * P.tpAtr * a,
+      risk: P.slAtr * a, atr: a
+    };
+  }
+
+  let live = null;
+  if(pos){
+    live = { action: pos.dir===1 ? 'BUY' : 'SELL',
+             entry: pos.entry, sl: pos.sl, tp: pos.tp,
+             ts: pos.t, tf: 'H1', atr: pos.atr };
+  } else if(closed.length){
+    const last = closed[closed.length-1];
+    if(bars[bars.length-1].t - last.closeTs <= 3*3600){
+      live = { action:'EXIT', entry:last.exit, sl:null, tp:null,
+               ts:last.closeTs, tf:'H1', note:last.reason };
+    }
+  }
+  return {live, closed};
+}
+
+/* ================= Twelve Data ================= */
+function creditState(){
+  const today = new Date().toISOString().slice(0,10);
+  let c;
+  try{ c = JSON.parse(get(LS.credits,'{}')); }catch(e){ c = {}; }
+  if(!c || c.day !== today) c = {day: today, used: 0};
+  return c;
+}
+function spendCredits(n){
+  const c = creditState();
+  c.used += n;
+  set(LS.credits, JSON.stringify(c));
+  paintCredits();
+}
+function paintCredits(){
+  const c = creditState();
+  $('#cUsed').textContent = c.used;
+  const now = new Date();
+  const mins = (24*60) - (now.getUTCHours()*60 + now.getUTCMinutes());
+  $('#cReset').textContent = Math.floor(mins/60) + 'h ' + (mins%60) + 'm';
+}
+
+async function fetchBars(pair, key){
+  const cacheKey = LS.bars + pair;
+  try{
+    const c = JSON.parse(get(cacheKey,'null'));
+    if(c && (Date.now()/1000 - c.ts) < 3300) return c.bars;
+  }catch(e){}
+
+  const url = 'https://api.twelvedata.com/time_series'
+    + '?symbol=' + encodeURIComponent(tdSymbol(pair))
+    + '&interval=1h&outputsize=' + P.barsToFetch
+    + '&timezone=UTC&order=ASC&apikey=' + encodeURIComponent(key);
+
+  const res = await fetch(url, {cache:'no-store'});
+  const js  = await res.json();
+  spendCredits(1);
+
+  if(js.status === 'error' || js.code)
+    throw new Error(js.message || ('error ' + js.code));
+  if(!js.values || !js.values.length)
+    throw new Error('no candles returned');
+
+  const bars = js.values.map(v => ({
+    t: Math.floor(new Date(v.datetime.replace(' ','T') + 'Z').getTime()/1000),
+    o: +v.open, h: +v.high, l: +v.low, c: +v.close
+  })).filter(b => !isNaN(b.t) && !isNaN(b.c));
+
+  try{ set(cacheKey, JSON.stringify({ts: Math.floor(Date.now()/1000), bars})); }catch(e){}
+  return bars;
+}
+
+async function syncTwelveData(silent){
+  const key = get(LS.key);
+  if(!key){ toast('Add your Twelve Data API key in Settings.'); return; }
+  const pairs = pairList();
+  const c = creditState();
+  if(c.used + pairs.length > 800){
+    toast('Daily credit limit would be exceeded. Quota resets at midnight UTC.');
     return;
   }
-  box.innerHTML = all.map(s => {
-    const cls = (s.action||'EXIT').toLowerCase();
-    const ratio = rr(s);
-    const levels = s.action === 'EXIT'
-      ? `<div class="lv"><i>Close at</i><b class="num">${fmt(s.pair, s.entry)}</b></div>`
-      : `<div class="lv"><i>Entry</i><b class="num">${fmt(s.pair, s.entry)}</b></div>
-         <div class="lv sl"><i>Stop loss</i><b class="num">${fmt(s.pair, s.sl)}</b></div>
-         <div class="lv tp"><i>Take profit</i><b class="num">${fmt(s.pair, s.tp)}</b></div>
-         ${ratio ? `<div class="lv"><i>Risk / reward</i><b class="num">1 : ${ratio}</b></div>` : ''}`;
-    return `<article class="row ${cls}">
-      <div class="row-top">
-        <span class="pair">${s.pair}</span>
-        <span class="act">${s.action}</span>
-        <span class="tf">${s.tf || 'H1'}</span>
-        <span class="age">${ago(s.ts)} ago</span>
-      </div>
-      <div class="levels">${levels}</div>
-      <div class="meta">
-        ${s.atr ? `<span>ATR <em>${fmt(s.pair, s.atr)}</em></span>` : ''}
-        ${s.spread!=null ? `<span>Spread <em>${s.spread}</em> pts</span>` : ''}
-        ${s.note ? `<span>${s.note}</span>` : ''}
-      </div>
-    </article>`;
-  }).join('');
-}
 
-function renderHistory(){
-  const h = state.history;
-  const box = $('#histList');
-  if(!h.length){
-    box.innerHTML = `<div class="empty"><b>No closed trades</b>
-      Once your engine publishes results to /history, they show up here with win rate and profit factor.</div>`;
-    $('#sTrades').textContent='0'; $('#sWin').textContent='—';
-    $('#sPF').textContent='—'; $('#sExp').textContent='—';
-    return;
+  state.busy = true;
+  $('#srcPill').className = 'pill busy';
+  $('#srcPill').textContent = 'LOADING';
+
+  const sigs = {}, hist = [];
+  let done = 0, failed = 0;
+
+  for(const pair of pairs){
+    try{
+      const bars = await fetchBars(pair, key);
+      const out  = runEngine(pair, bars);
+      if(out.live) sigs[pair] = out.live;
+      hist.push(...out.closed);
+    }catch(err){
+      failed++;
+      if(!silent) toast(pair + ': ' + err.message);
+      if(/credit|429|limit/i.test(err.message)) break;
+    }
+    done++;
+    progress(done / pairs.length);
+    if(done < pairs.length) await sleep(8200);
   }
-  const wins = h.filter(t => t.r > 0), losses = h.filter(t => t.r < 0);
-  const gp = wins.reduce((a,t)=>a+t.r, 0);
-  const gl = Math.abs(losses.reduce((a,t)=>a+t.r, 0));
-  $('#sTrades').textContent = h.length;
-  $('#sWin').textContent = (wins.length / h.length * 100).toFixed(1) + '%';
-  $('#sPF').textContent = gl ? (gp/gl).toFixed(2) : '∞';
-  $('#sExp').textContent = (h.reduce((a,t)=>a+t.r, 0) / h.length).toFixed(2) + 'R';
+  progress(0);
+  state.busy = false;
 
-  box.innerHTML = h.map(t => {
-    const cls = t.r > 0 ? 'win' : (t.r < 0 ? 'loss' : 'be');
-    const d = t.closeTs ? new Date(t.closeTs*1000).toLocaleDateString('en-GB',
-                {day:'2-digit',month:'short'}) : '';
-    return `<div class="hrow">
-      <span class="pair num">${t.pair}</span>
-      <span class="hmeta">${t.action} &middot; ${d}</span>
-      <span class="res ${cls}">${t.r > 0 ? '+' : ''}${Number(t.r).toFixed(2)}R</span>
-    </div>`;
-  }).join('');
+  state.signals = sigs;
+  state.history = hist.sort((a,b) => b.closeTs - a.closeTs).slice(0, 300);
+  state.lastSync = Math.floor(Date.now()/1000);
+  try{
+    set(LS.cacheSig, JSON.stringify(state.signals));
+    set(LS.cacheHist, JSON.stringify(state.history));
+  }catch(e){}
+
+  const dead = failed === pairs.length;
+  $('#srcPill').className = 'pill ' + (dead ? 'off' : 'live');
+  $('#srcPill').textContent = dead ? 'OFFLINE' : 'TWELVE DATA';
+  notifyNew(sigs);
+  renderLive(); renderHistory();
+  if(!silent && !dead) toast('Scanned ' + (pairs.length - failed) + ' pairs');
 }
 
-/* ---------------- data ---------------- */
+/* ================= Firebase ================= */
 async function fbGet(path){
   const url = get(LS.url).replace(/\/+$/,'');
   if(!url) throw new Error('No database URL set');
   const tok = get(LS.tok);
-  const q = tok ? `?auth=${encodeURIComponent(tok)}` : '';
-  const res = await fetch(`${url}/${path}.json${q}`, {cache:'no-store'});
-  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const q = tok ? '?auth=' + encodeURIComponent(tok) : '';
+  const res = await fetch(url + '/' + path + '.json' + q, {cache:'no-store'});
+  if(!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
-
-function demoData(){
-  // Deterministic-ish fake feed so the UI is testable without an engine.
-  const base = {XAUUSD:3410.50,EURUSD:1.0865,GBPUSD:1.2710,USDJPY:151.40,AUDUSD:0.6605,
-                USDCAD:1.3620,USDCHF:0.8815,NZDUSD:0.6010,EURJPY:164.50,GBPJPY:192.30};
-  const acts = ['BUY','SELL','EXIT','FLAT'];
-  const sigs = {};
-  const slot = Math.floor(Date.now()/900000);          // rotates every 15 min
-  PAIRS.forEach((p,i) => {
-    const a = acts[(slot + i*3) % 4];
-    if(a === 'FLAT') return;
-    const px = base[p], d = digits(p);
-    const atr = p.startsWith('XAU') ? 6.4 : (p.includes('JPY') ? 0.42 : 0.0038);
-    const dir = a === 'SELL' ? -1 : 1;
-    sigs[p] = {
-      action: a,
-      entry: +px.toFixed(d),
-      sl: a==='EXIT' ? null : +(px - dir*1.5*atr).toFixed(d),
-      tp: a==='EXIT' ? null : +(px + dir*2.5*atr).toFixed(d),
-      ts: Math.floor(Date.now()/1000) - ((slot + i) % 7) * 900,
-      tf: 'H1', atr:+atr.toFixed(d),
-      spread: p.startsWith('XAU') ? 28 : 9,
-      note: 'demo'
-    };
-  });
-  const hist = [];
-  for(let i=0;i<24;i++){
-    const p = PAIRS[i % PAIRS.length];
-    const win = (i*7 % 10) < 5;                        // ~50% win rate, honest
-    hist.push({
-      pair:p, action: i%2 ? 'BUY':'SELL',
-      r: win ? +(1.2 + (i%4)*0.35).toFixed(2) : -1,
-      closeTs: Math.floor(Date.now()/1000) - i*86400
-    });
-  }
-  return {sigs, hist};
-}
-
-async function sync(silent){
-  const demo = get(LS.demo,'1') === '1';
-  $('#srcPill').className = 'pill ' + (demo ? 'demo' : 'live');
-  $('#srcPill').textContent = demo ? 'DEMO' : 'LIVE';
-
-  if(demo){
-    const d = demoData();
-    state.signals = d.sigs; state.history = d.hist;
-    state.lastSync = Math.floor(Date.now()/1000);
-    renderLive(); renderHistory();
-    if(!silent) toast('Demo feed refreshed');
-    return;
-  }
+async function syncFirebase(silent){
   try{
     const [sig, hist] = await Promise.all([
-      fbGet('signals').catch(()=>null),
-      fbGet('history').catch(()=>null)
+      fbGet('signals').catch(()=>null), fbGet('history').catch(()=>null)
     ]);
     state.signals = sig || {};
     state.history = hist ? Object.values(hist).sort((a,b)=>(b.closeTs||0)-(a.closeTs||0)) : [];
     state.lastSync = Math.floor(Date.now()/1000);
     set(LS.cacheSig, JSON.stringify(state.signals));
     set(LS.cacheHist, JSON.stringify(state.history));
+    $('#srcPill').className = 'pill live'; $('#srcPill').textContent = 'FIREBASE';
     notifyNew(state.signals);
-    renderLive(); renderHistory();
-    if(!silent) toast('Signals updated');
   }catch(err){
-    $('#srcPill').className = 'pill off';
-    $('#srcPill').textContent = 'OFFLINE';
-    const c = get(LS.cacheSig); if(c) state.signals = JSON.parse(c);
-    const h = get(LS.cacheHist); if(h) state.history = JSON.parse(h);
-    renderLive(); renderHistory();
+    $('#srcPill').className = 'pill off'; $('#srcPill').textContent = 'OFFLINE';
+    loadCache();
     if(!silent) toast('Could not reach the database. Showing last saved signals.');
   }
+  renderLive(); renderHistory();
 }
 
+/* ================= demo ================= */
+function demoData(){
+  const base = {XAUUSD:3410.50,EURUSD:1.0865,GBPUSD:1.2710,USDJPY:151.40,
+                AUDUSD:0.6605,USDCAD:1.3620,USDCHF:0.8815,NZDUSD:0.6010};
+  const acts = ['BUY','SELL','EXIT','FLAT'];
+  const pairs = pairList();
+  const sigs = {}, hist = [];
+  const slot = Math.floor(Date.now()/900000);
+  pairs.forEach((p,i) => {
+    const a = acts[(slot + i*3) % 4];
+    if(a === 'FLAT' || !base[p]) return;
+    const px = base[p], d = digits(p);
+    const at = p.startsWith('XAU') ? 6.4 : (p.includes('JPY') ? 0.42 : 0.0038);
+    const dir = a === 'SELL' ? -1 : 1;
+    sigs[p] = { action:a, entry:+px.toFixed(d),
+      sl: a==='EXIT'? null : +(px - dir*P.slAtr*at).toFixed(d),
+      tp: a==='EXIT'? null : +(px + dir*P.tpAtr*at).toFixed(d),
+      ts: Math.floor(Date.now()/1000) - ((slot+i)%7)*900,
+      tf:'H1', atr:+at.toFixed(d), note:'demo' };
+  });
+  for(let i=0;i<24;i++){
+    const p = pairs[i % pairs.length];
+    const win = (i*7 % 10) < 5;
+    hist.push({ pair:p, action: i%2 ? 'BUY':'SELL',
+      r: win ? +(1.2 + (i%4)*0.35).toFixed(2) : -1,
+      closeTs: Math.floor(Date.now()/1000) - i*86400 });
+  }
+  return {sigs, hist};
+}
+
+/* ================= sync router ================= */
+function loadCache(){
+  try{
+    const c = get(LS.cacheSig); if(c) state.signals = JSON.parse(c);
+    const h = get(LS.cacheHist); if(h) state.history = JSON.parse(h);
+  }catch(e){}
+}
+async function sync(silent){
+  if(state.busy) return;
+  const src = get(LS.src,'demo');
+  $('#histNote').textContent = src === 'demo'
+    ? 'Demo numbers are made up so you can see the layout. They mean nothing.'
+    : (src === 'td'
+       ? 'Simulated by replaying the rules over the downloaded candles. No spread, commission or slippage applied, so real trading will be worse. Under 100 trades, treat every number as noise.'
+       : 'Results published by your engine. Win rate alone does not tell you if a system makes money; profit factor above 1.2 matters more.');
+
+  if(src === 'demo'){
+    const d = demoData();
+    state.signals = d.sigs; state.history = d.hist;
+    state.lastSync = Math.floor(Date.now()/1000);
+    $('#srcPill').className = 'pill demo'; $('#srcPill').textContent = 'DEMO';
+    renderLive(); renderHistory();
+    if(!silent) toast('Demo feed refreshed');
+    return;
+  }
+  if(src === 'td') return syncTwelveData(silent);
+  return syncFirebase(silent);
+}
+
+/* ================= rendering ================= */
+function renderFilters(){
+  const wrap = $('#filters');
+  wrap.innerHTML = ['ALL', ...pairList()].map(p =>
+    '<button class="chip" data-p="'+p+'" aria-pressed="'+(state.filter===p)+'">'+p+'</button>').join('');
+  wrap.onclick = e => {
+    const b = e.target.closest('.chip'); if(!b) return;
+    state.filter = b.dataset.p; set(LS.filter, state.filter);
+    renderFilters(); renderLive();
+  };
+}
+function rr(s){
+  if(!s || s.action==='EXIT' || s.sl==null || s.tp==null) return null;
+  const risk = Math.abs(s.entry - s.sl), rew = Math.abs(s.tp - s.entry);
+  return (risk && rew) ? (rew/risk).toFixed(2) : null;
+}
+function renderLive(){
+  const all = Object.entries(state.signals).map(([pair,s]) => ({pair, ...s}))
+    .filter(s => state.filter==='ALL' || s.pair===state.filter)
+    .sort((a,b) => (b.ts||0)-(a.ts||0));
+
+  let buy=0, sell=0, flat=0;
+  Object.values(state.signals).forEach(s => {
+    if(s.action==='BUY') buy++; else if(s.action==='SELL') sell++; else flat++;
+  });
+  $('#cBuy').textContent = buy; $('#cSell').textContent = sell;
+  $('#cFlat').textContent = flat;
+  $('#cAge').textContent = state.lastSync ? ago(state.lastSync) : '—';
+
+  const box = $('#liveList');
+  if(!all.length){
+    box.innerHTML = '<div class="empty"><b>No open signals</b>'
+      + 'The filters are rejecting everything right now. That is normal — this engine '
+      + 'only trades when the daily trend, volatility and session all line up.</div>';
+    return;
+  }
+  box.innerHTML = all.map(s => {
+    const cls = (s.action||'EXIT').toLowerCase();
+    const ratio = rr(s);
+    const levels = s.action === 'EXIT'
+      ? '<div class="lv"><i>Close at</i><b class="num">'+fmt(s.pair,s.entry)+'</b></div>'
+      : '<div class="lv"><i>Entry</i><b class="num">'+fmt(s.pair,s.entry)+'</b></div>'
+      + '<div class="lv sl"><i>Stop loss</i><b class="num">'+fmt(s.pair,s.sl)+'</b></div>'
+      + '<div class="lv tp"><i>Take profit</i><b class="num">'+fmt(s.pair,s.tp)+'</b></div>'
+      + (ratio ? '<div class="lv"><i>Risk / reward</i><b class="num">1 : '+ratio+'</b></div>' : '');
+    return '<article class="row '+cls+'">'
+      + '<div class="row-top"><span class="pair">'+s.pair+'</span>'
+      + '<span class="act">'+s.action+'</span>'
+      + '<span class="tf">'+(s.tf||'H1')+'</span>'
+      + '<span class="age">'+ago(s.ts)+' ago</span></div>'
+      + '<div class="levels">'+levels+'</div>'
+      + '<div class="meta">'
+      + (s.atr ? '<span>ATR <em>'+fmt(s.pair,s.atr)+'</em></span>' : '')
+      + (s.note ? '<span>'+s.note+'</span>' : '')
+      + '<span>check spread before entry</span>'
+      + '</div></article>';
+  }).join('');
+}
+function renderHistory(){
+  const h = state.history, box = $('#histList');
+  if(!h.length){
+    box.innerHTML = '<div class="empty"><b>No closed trades</b>'
+      + 'Run a scan and the closed trades from the downloaded window appear here.</div>';
+    $('#sTrades').textContent='0'; $('#sWin').textContent='—';
+    $('#sPF').textContent='—'; $('#sExp').textContent='—';
+    return;
+  }
+  const wins = h.filter(t => t.r > 0), losses = h.filter(t => t.r < 0);
+  const gp = wins.reduce((a,t)=>a+t.r,0), gl = Math.abs(losses.reduce((a,t)=>a+t.r,0));
+  $('#sTrades').textContent = h.length;
+  $('#sWin').textContent = (wins.length/h.length*100).toFixed(1) + '%';
+  $('#sPF').textContent = gl ? (gp/gl).toFixed(2) : '∞';
+  $('#sExp').textContent = (h.reduce((a,t)=>a+t.r,0)/h.length).toFixed(2) + 'R';
+
+  box.innerHTML = h.slice(0,120).map(t => {
+    const cls = t.r > 0 ? 'win' : (t.r < 0 ? 'loss' : 'be');
+    const d = t.closeTs ? new Date(t.closeTs*1000)
+                .toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) : '';
+    return '<div class="hrow"><span class="pair num">'+t.pair+'</span>'
+      + '<span class="hmeta">'+t.action+' &middot; '+d+(t.reason? ' &middot; '+t.reason:'')+'</span>'
+      + '<span class="res '+cls+'">'+(t.r>0?'+':'')+Number(t.r).toFixed(2)+'R</span></div>';
+  }).join('');
+}
+
+/* ================= notifications ================= */
 const canNotify = () => typeof Notification !== 'undefined';
 function notifyNew(sigs){
-  if(get(LS.notify) !== '1' || !canNotify() || Notification.permission !== 'granted') return;
-  const seen = JSON.parse(get(LS.seen,'{}'));
+  if(get(LS.notify)!=='1' || !canNotify() || Notification.permission!=='granted') return;
+  let seen = {};
+  try{ seen = JSON.parse(get(LS.seen,'{}')); }catch(e){}
   const next = {};
   Object.entries(sigs).forEach(([p,s]) => {
     next[p] = s.ts;
     if(seen[p] !== s.ts && s.action !== 'EXIT'){
-      new Notification(`${s.action}  ${p}`, {
-        body:`Entry ${fmt(p,s.entry)} · SL ${fmt(p,s.sl)} · TP ${fmt(p,s.tp)}`,
-        tag:p, icon:'icon-192.png'
+      new Notification(s.action + '  ' + p, {
+        body: 'Entry ' + fmt(p,s.entry) + ' · SL ' + fmt(p,s.sl) + ' · TP ' + fmt(p,s.tp),
+        tag: p, icon: 'icon-192.png'
       });
     }
   });
   set(LS.seen, JSON.stringify(next));
 }
 
-function startTimer(){
-  clearInterval(state.timer);
-  const secs = parseInt(get(LS.refresh,'60'), 10);
-  if(secs > 0) state.timer = setInterval(()=>sync(true), secs*1000);
-}
-
-/* ---------------- tabs ---------------- */
+/* ================= tabs ================= */
 function showTab(name){
   ['live','history','settings'].forEach(t => $('#v-'+t).hidden = (t !== name));
   $$('#tabs button, #bottom button').forEach(b =>
     b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+  if(name === 'settings') paintCredits();
   window.scrollTo({top:0});
 }
 $('#tabs').onclick = $('#bottom').onclick = e => {
   const b = e.target.closest('button[data-tab]'); if(b) showTab(b.dataset.tab);
 };
 
-/* ---------------- settings wiring ---------------- */
-function bindSwitch(el, key, onChange){
-  el.setAttribute('aria-pressed', get(key, key===LS.demo?'1':'0') === '1');
-  el.onclick = async () => {
-    const next = el.getAttribute('aria-pressed') !== 'true';
-    el.setAttribute('aria-pressed', String(next));
-    set(key, next ? '1' : '0');
-    if(onChange) await onChange(next);
-  };
+/* ================= settings ================= */
+function showSrcFields(){
+  const src = $('#fSrc').value;
+  $$('[data-src]').forEach(el => el.hidden = (el.dataset.src !== src));
 }
+$('#fSrc').value   = get(LS.src,'demo');
+$('#fKey').value   = get(LS.key);
+$('#fPairs').value = get(LS.pairs, DEFAULT_PAIRS.join(','));
+$('#fUrl').value   = get(LS.url);
+$('#fTok').value   = get(LS.tok);
+$('#fRefresh').value = get(LS.refresh,'3600');
+showSrcFields();
+$('#fSrc').onchange = showSrcFields;
 
-$('#fUrl').value = get(LS.url);
-$('#fTok').value = get(LS.tok);
-$('#fRefresh').value = get(LS.refresh,'60');
-
-bindSwitch($('#tDemo'), LS.demo, () => sync());
-bindSwitch($('#tNotify'), LS.notify, async on => {
-  if(on && !canNotify()){
-    el_notifyFail('This browser does not support notifications.'); return;
+$('#tNotify').setAttribute('aria-pressed', get(LS.notify,'0') === '1');
+$('#tNotify').onclick = async () => {
+  const el = $('#tNotify');
+  const next = el.getAttribute('aria-pressed') !== 'true';
+  el.setAttribute('aria-pressed', String(next));
+  set(LS.notify, next ? '1' : '0');
+  if(next && !canNotify()){
+    el.setAttribute('aria-pressed','false'); set(LS.notify,'0');
+    toast('This browser does not support notifications.'); return;
   }
-  if(on && Notification.permission !== 'granted'){
-    const p = await Notification.requestPermission();
-    if(p !== 'granted'){
-      $('#tNotify').setAttribute('aria-pressed','false');
-      set(LS.notify,'0');
+  if(next && Notification.permission !== 'granted'){
+    const perm = await Notification.requestPermission();
+    if(perm !== 'granted'){
+      el.setAttribute('aria-pressed','false'); set(LS.notify,'0');
       toast('Notifications are blocked in your browser settings.');
     }
   }
-});
+};
 
 $('#bSave').onclick = () => {
+  set(LS.src, $('#fSrc').value);
+  set(LS.key, $('#fKey').value.trim());
+  set(LS.pairs, $('#fPairs').value.trim());
   set(LS.url, $('#fUrl').value.trim());
   set(LS.tok, $('#fTok').value.trim());
   set(LS.refresh, $('#fRefresh').value);
-  startTimer(); sync();
+  state.filter = 'ALL'; set(LS.filter,'ALL');
+  renderFilters(); startTimer(); sync();
   toast('Settings saved');
 };
 
 $('#bTest').onclick = async () => {
-  set(LS.url, $('#fUrl').value.trim());
-  set(LS.tok, $('#fTok').value.trim());
-  if(!get(LS.url)) return toast('Enter your database URL first.');
-  try{
-    const d = await fbGet('signals');
-    toast(d ? `Connected. ${Object.keys(d).length} pairs found.` : 'Connected, but /signals is empty.');
-  }catch(err){
-    toast('Connection failed: ' + err.message);
+  const src = $('#fSrc').value;
+  if(src === 'demo') return toast('Demo mode needs no connection.');
+  if(src === 'fb'){
+    set(LS.url, $('#fUrl').value.trim()); set(LS.tok, $('#fTok').value.trim());
+    try{
+      const d = await fbGet('signals');
+      toast(d ? 'Connected. ' + Object.keys(d).length + ' pairs found.' : 'Connected, /signals is empty.');
+    }catch(err){ toast('Connection failed: ' + err.message); }
+    return;
   }
+  const key = $('#fKey').value.trim();
+  if(!key) return toast('Paste your Twelve Data API key first.');
+  set(LS.key, key);
+  try{
+    const r = await fetch('https://api.twelvedata.com/quote?symbol=EUR/USD&apikey='
+                          + encodeURIComponent(key), {cache:'no-store'});
+    const j = await r.json();
+    spendCredits(1);
+    if(j.code || j.status === 'error') toast('Key rejected: ' + (j.message || j.code));
+    else toast('Key works. EUR/USD is at ' + j.close);
+  }catch(err){ toast('Network error: ' + err.message); }
 };
 
 $('#bClear').onclick = () => {
+  Object.keys(localStorage).filter(k => k.indexOf(LS.bars) === 0)
+    .forEach(k => localStorage.removeItem(k));
   [LS.cacheSig, LS.cacheHist, LS.seen].forEach(k => localStorage.removeItem(k));
-  toast('Cached data cleared');
+  toast('Cached candles cleared');
 };
 
-/* ---------------- install prompt ---------------- */
+/* ================= install prompt ================= */
 let deferred = null;
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault(); deferred = e; $('#bInstall').hidden = false;
@@ -637,15 +966,24 @@ $('#bInstall').onclick = async () => {
   deferred = null; $('#bInstall').hidden = true;
 };
 
-/* ---------------- disclaimer gate ---------------- */
+/* ================= boot ================= */
+function startTimer(){
+  clearInterval(state.timer);
+  const secs = parseInt(get(LS.refresh,'3600'), 10);
+  if(secs > 0) state.timer = setInterval(() => sync(true), secs*1000);
+}
 if(get(LS.gate) === VERSION) $('#gate').classList.add('hide');
 $('#bAccept').onclick = () => { set(LS.gate, VERSION); $('#gate').classList.add('hide'); };
 
-/* ---------------- boot ---------------- */
 renderFilters();
+loadCache();
+renderLive(); renderHistory();
+paintCredits();
 sync(true);
 startTimer();
-document.addEventListener('visibilitychange', () => { if(!document.hidden) sync(true); });
+document.addEventListener('visibilitychange', () => {
+  if(!document.hidden && get(LS.src,'demo') !== 'td') sync(true);
+});
 if('serviceWorker' in navigator){
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
 }

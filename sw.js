@@ -1,9 +1,9 @@
 /* AMC SIGNAL PRO — service worker
-   v1.03
+   v1.04
    Strategy: network-first for app shell, cache as offline fallback.
    Firebase API calls are never cached (stale signals are dangerous). */
 
-const CACHE = 'amc-signal-pro-v1.03';
+const CACHE = 'amc-signal-pro-v1.04';
 const SHELL = [
   './',
   './index.html',
@@ -35,7 +35,8 @@ self.addEventListener('fetch', e => {
 
   // Never cache signal data — an old BUY shown as live is worse than no signal.
   if (url.hostname.endsWith('firebaseio.com') ||
-      url.hostname.endsWith('firebasedatabase.app')) {
+      url.hostname.endsWith('firebasedatabase.app') ||
+      url.hostname === 'api.twelvedata.com') {
     return;
   }
 
