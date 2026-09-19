@@ -1,9 +1,9 @@
 /* AMC SIGNAL PRO — service worker
-   v1.04
+   v1.05
    Strategy: network-first for app shell, cache as offline fallback.
    Firebase API calls are never cached (stale signals are dangerous). */
 
-const CACHE = 'amc-signal-pro-v1.04';
+const CACHE = 'amc-signal-pro-v1.05';
 const SHELL = [
   './',
   './index.html',

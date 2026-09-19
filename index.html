@@ -2,10 +2,14 @@
 <!--
 =====================================================================
   AMC SIGNAL PRO  —  Forex Signal PWA
-  Version: v1.04
+  Version: v1.05
   Build   : 2026-09-19
 ---------------------------------------------------------------------
   CHANGELOG
+  v1.05  Paper account panel. When the Firebase engine is publishing a
+         virtual account at /paper/account, the History tab shows
+         balance, equity, floating P&L, net profit and max drawdown,
+         and every closed trade shows its money result next to its R.
   v1.04  Twelve Data signal engine, running on the device.
          - One /time_series request per pair (H1 candles, 2000 bars)
          - H4 and D1 built locally from the H1 series — no extra credits
@@ -118,14 +122,24 @@ main{padding:0 0 24px}
 
 .hrow{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
 .hrow .pair{font-size:13.5px}
-.hrow .res{margin-left:auto;font-family:var(--mono);font-size:13.5px;font-weight:600}
+.hrow .res{margin-left:10px;min-width:56px;text-align:right;font-family:var(--mono);font-size:13.5px;font-weight:600}
 .win{color:var(--buy)} .loss{color:var(--sell)} .be{color:var(--exit)}
-.hmeta{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+.hmeta{margin-right:auto;font-family:var(--mono);font-size:10.5px;color:var(--muted)}
 
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line)}
 .stats div{background:var(--ink);padding:13px 16px}
 .stats b{display:block;font-family:var(--mono);font-size:21px;font-weight:600;line-height:1.15}
 .stats span{font-size:11px;color:var(--muted)}
+.paper{border-bottom:1px solid var(--line);padding:14px 16px 15px}
+.paper .eq{display:flex;align-items:baseline;gap:10px}
+.paper .eq b{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.02em}
+.paper .eq u{text-decoration:none;font-family:var(--mono);font-size:13px}
+.paper .eq s{text-decoration:none;font-size:11px;color:var(--muted);margin-left:auto}
+.paper .grid{display:flex;gap:18px;margin-top:11px;flex-wrap:wrap}
+.paper .grid div i{display:block;font-style:normal;font-size:10px;color:var(--muted)}
+.paper .grid div b{font-family:var(--mono);font-size:13.5px;font-weight:500}
+.up{color:var(--buy)} .down{color:var(--sell)}
+.hrow .cash{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:62px;text-align:right}
 .note{padding:12px 16px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line);line-height:1.5}
 
 .form{padding:16px}
@@ -184,7 +198,7 @@ main{padding:0 0 24px}
 <header>
   <div class="brand">
     <h1><b>AMC</b> SIGNAL PRO</h1>
-    <span class="ver">v1.04</span>
+    <span class="ver">v1.05</span>
     <span class="spacer"></span>
     <span class="pill" id="srcPill">—</span>
   </div>
@@ -209,6 +223,7 @@ main{padding:0 0 24px}
   </section>
 
   <section id="v-history" hidden>
+    <div id="paperBox"></div>
     <div class="stats">
       <div><b class="num" id="sTrades">0</b><span>Closed trades</span></div>
       <div><b class="num" id="sWin">—</b><span>Win rate</span></div>
@@ -280,7 +295,7 @@ main{padding:0 0 24px}
       <button class="btn ghost" id="bInstall" hidden>Install app</button>
       <button class="btn ghost" id="bClear">Clear cached candles</button>
       <p class="foot" style="padding:20px 0 0">
-        AMC SIGNAL PRO v1.04 &middot; build 2026-09-19<br>
+        AMC SIGNAL PRO v1.05 &middot; build 2026-09-19<br>
         Informational only. Not financial advice.
       </p>
     </div>
@@ -311,13 +326,13 @@ main{padding:0 0 24px}
 
 <script>
 'use strict';
-const VERSION = 'v1.04';
+const VERSION = 'v1.05';
 const DEFAULT_PAIRS = ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD'];
 const LS = {
   src:'amc.src', key:'amc.key', pairs:'amc.pairs',
   url:'amc.url', tok:'amc.tok', notify:'amc.notify', refresh:'amc.refresh',
   gate:'amc.gate', filter:'amc.filter', credits:'amc.credits',
-  cacheSig:'amc.cache.sig', cacheHist:'amc.cache.hist',
+  cacheSig:'amc.cache.sig', cacheHist:'amc.cache.hist', cachePaper:'amc.cache.paper',
   bars:'amc.bars.', seen:'amc.seen'
 };
 
@@ -339,7 +354,7 @@ const get = (k,d='') => localStorage.getItem(k) ?? d;
 const set = (k,v) => localStorage.setItem(k,v);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-let state = { signals:{}, history:[], filter:get(LS.filter,'ALL'),
+let state = { signals:{}, history:[], paper:null, filter:get(LS.filter,'ALL'),
               timer:null, lastSync:0, busy:false };
 
 /* ================= helpers ================= */
@@ -659,6 +674,7 @@ async function syncTwelveData(silent){
   progress(0);
   state.busy = false;
 
+  state.paper = null;
   state.signals = sigs;
   state.history = hist.sort((a,b) => b.closeTs - a.closeTs).slice(0, 300);
   state.lastSync = Math.floor(Date.now()/1000);
@@ -687,14 +703,18 @@ async function fbGet(path){
 }
 async function syncFirebase(silent){
   try{
-    const [sig, hist] = await Promise.all([
-      fbGet('signals').catch(()=>null), fbGet('history').catch(()=>null)
+    const [sig, hist, paper] = await Promise.all([
+      fbGet('signals').catch(()=>null),
+      fbGet('history').catch(()=>null),
+      fbGet('paper/account').catch(()=>null)
     ]);
+    state.paper = paper || null;
     state.signals = sig || {};
     state.history = hist ? Object.values(hist).sort((a,b)=>(b.closeTs||0)-(a.closeTs||0)) : [];
     state.lastSync = Math.floor(Date.now()/1000);
     set(LS.cacheSig, JSON.stringify(state.signals));
     set(LS.cacheHist, JSON.stringify(state.history));
+    set(LS.cachePaper, JSON.stringify(state.paper));
     $('#srcPill').className = 'pill live'; $('#srcPill').textContent = 'FIREBASE';
     notifyNew(state.signals);
   }catch(err){
@@ -740,6 +760,7 @@ function loadCache(){
   try{
     const c = get(LS.cacheSig); if(c) state.signals = JSON.parse(c);
     const h = get(LS.cacheHist); if(h) state.history = JSON.parse(h);
+    const pp = get(LS.cachePaper); if(pp) state.paper = JSON.parse(pp);
   }catch(e){}
 }
 async function sync(silent){
@@ -753,7 +774,7 @@ async function sync(silent){
 
   if(src === 'demo'){
     const d = demoData();
-    state.signals = d.sigs; state.history = d.hist;
+    state.signals = d.sigs; state.history = d.hist; state.paper = null;
     state.lastSync = Math.floor(Date.now()/1000);
     $('#srcPill').className = 'pill demo'; $('#srcPill').textContent = 'DEMO';
     renderLive(); renderHistory();
@@ -822,7 +843,33 @@ function renderLive(){
       + '</div></article>';
   }).join('');
 }
+function money(v, cur){
+  if(v==null || isNaN(v)) return '—';
+  const n = Number(v);
+  return (n>0?'+':'') + n.toFixed(2) + (cur ? ' ' + cur : '');
+}
+function renderPaper(){
+  const p = state.paper, box = $('#paperBox');
+  if(!p || p.balance==null){ box.innerHTML = ''; return; }
+  const cur  = p.currency || '';
+  const eq   = Number(p.equity != null ? p.equity : p.balance);
+  const net  = Number(p.netProfit != null ? p.netProfit : (eq - p.startBalance));
+  const flo  = Number(p.floating || 0);
+  const cls  = net >= 0 ? 'up' : 'down';
+  box.innerHTML = '<div class="paper">'
+    + '<div class="eq"><b class="'+cls+'">' + eq.toFixed(2) + '</b>'
+    + '<u class="'+cls+'">' + money(net, cur) + '</u>'
+    + '<s>paper account, started at ' + Number(p.startBalance).toFixed(0) + '</s></div>'
+    + '<div class="grid">'
+    + '<div><i>Balance</i><b>' + Number(p.balance).toFixed(2) + '</b></div>'
+    + '<div><i>Floating</i><b class="'+(flo>=0?'up':'down')+'">' + money(flo,'') + '</b></div>'
+    + '<div><i>Open</i><b>' + (p.openTrades||0) + '</b></div>'
+    + '<div><i>Max drawdown</i><b>' + Number(p.maxDDPercent||0).toFixed(1) + '%</b></div>'
+    + '<div><i>Risk / trade</i><b>' + Number(p.riskPercent||0).toFixed(1) + '%</b></div>'
+    + '</div></div>';
+}
 function renderHistory(){
+  renderPaper();
   const h = state.history, box = $('#histList');
   if(!h.length){
     box.innerHTML = '<div class="empty"><b>No closed trades</b>'
@@ -842,8 +889,11 @@ function renderHistory(){
     const cls = t.r > 0 ? 'win' : (t.r < 0 ? 'loss' : 'be');
     const d = t.closeTs ? new Date(t.closeTs*1000)
                 .toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) : '';
+    const cash = (t.pnl!=null && !isNaN(t.pnl))
+      ? '<span class="cash">'+(t.pnl>0?'+':'')+Number(t.pnl).toFixed(2)+'</span>' : '';
     return '<div class="hrow"><span class="pair num">'+t.pair+'</span>'
       + '<span class="hmeta">'+t.action+' &middot; '+d+(t.reason? ' &middot; '+t.reason:'')+'</span>'
+      + cash
       + '<span class="res '+cls+'">'+(t.r>0?'+':'')+Number(t.r).toFixed(2)+'R</span></div>';
   }).join('');
 }
