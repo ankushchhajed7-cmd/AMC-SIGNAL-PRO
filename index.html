@@ -2,10 +2,14 @@
 <!--
 =====================================================================
   AMC SIGNAL PRO  —  Forex Signal PWA
-  Version: v1.01
+  Version: v1.03
   Build   : 2026-09-19
 ---------------------------------------------------------------------
   CHANGELOG
+  v1.03  Flat repo layout — every file sits in the repository root, no
+         icons/ subfolder. Fixes the manifest icon 404 that stopped
+         Chrome from offering "Install app".
+  v1.02  Icon switched to a text-based SVG (superseded by v1.03).
   v1.01  Renamed to AMC SIGNAL PRO (was "Signal Desk").
          - Brand lockup in header, manifest, service worker cache
          - localStorage keys re-prefixed sd.* -> amc.*
@@ -27,7 +31,7 @@
 <meta name="theme-color" content="#0E1116">
 <title>AMC SIGNAL PRO</title>
 <link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
@@ -214,7 +218,7 @@ main{padding:0 0 24px}
 <header>
   <div class="brand">
     <h1><b>AMC</b> SIGNAL PRO</h1>
-    <span class="ver">v1.01</span>
+    <span class="ver">v1.03</span>
     <span class="spacer"></span>
     <span class="pill" id="srcPill">—</span>
   </div>
@@ -290,7 +294,7 @@ main{padding:0 0 24px}
       <button class="btn ghost" id="bInstall" hidden>Install app</button>
       <button class="btn ghost" id="bClear">Clear cached data</button>
       <p class="foot" style="padding:20px 0 0">
-        AMC SIGNAL PRO v1.01 &middot; build 2026-09-19<br>
+        AMC SIGNAL PRO v1.03 &middot; build 2026-09-19<br>
         Informational only. Not financial advice.
       </p>
     </div>
@@ -321,7 +325,7 @@ main{padding:0 0 24px}
 
 <script>
 'use strict';
-const VERSION = 'v1.01';
+const VERSION = 'v1.03';
 const PAIRS = ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','USDCHF','NZDUSD','EURJPY','GBPJPY'];
 const LS = {
   url:'amc.url', tok:'amc.tok', demo:'amc.demo', notify:'amc.notify',
@@ -543,7 +547,7 @@ function notifyNew(sigs){
     if(seen[p] !== s.ts && s.action !== 'EXIT'){
       new Notification(`${s.action}  ${p}`, {
         body:`Entry ${fmt(p,s.entry)} · SL ${fmt(p,s.sl)} · TP ${fmt(p,s.tp)}`,
-        tag:p, icon:'icons/icon-192.png'
+        tag:p, icon:'icon-192.png'
       });
     }
   });
