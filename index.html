@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<!--
+=====================================================================
+  AMC SIGNAL PRO  —  Forex Signal PWA
+  Version: v1.01
+  Build   : 2026-09-19
+---------------------------------------------------------------------
+  CHANGELOG
+  v1.01  Renamed to AMC SIGNAL PRO (was "Signal Desk").
+         - Brand lockup in header, manifest, service worker cache
+         - localStorage keys re-prefixed sd.* -> amc.*
+         - Disclaimer re-shows once on this version
+  v1.00  First build.
+         - BUY / SELL / EXIT signal feed (Firebase Realtime DB, REST)
+         - Demo mode so the app runs before the engine exists
+         - History tab with win rate / profit factor / expectancy
+         - Settings: DB URL + token stored on device, never in repo
+         - Risk disclaimer gate, offline cache, install prompt
+---------------------------------------------------------------------
+  Single file. Vanilla JS. No build step. GitHub Pages ready.
+=====================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0E1116">
+<title>AMC SIGNAL PRO</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+:root{
+  --ink:#0E1116;
+  --ink2:#151A21;
+  --ink3:#1C232C;
+  --line:#242C38;
+  --amber:#F0B429;
+  --amber-dim:#8A6A1C;
+  --buy:#2DD4A7;
+  --sell:#FF5C5C;
+  --exit:#8B96A5;
+  --text:#E6EAF0;
+  --muted:#79838F;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"SF Mono","Roboto Mono","DejaVu Sans Mono",monospace;
+  --bar:60px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--ink);color:var(--text);font-family:var(--sans);
+  font-size:15px;line-height:1.45;
+  padding-bottom:calc(var(--bar) + env(safe-area-inset-bottom));
+  overscroll-behavior-y:contain;
+}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+
+/* ---------- header ---------- */
+header{
+  position:sticky;top:0;z-index:40;background:var(--ink);
+  border-bottom:1px solid var(--line);
+  padding:calc(10px + env(safe-area-inset-top)) 16px 0;
+}
+.brand{display:flex;align-items:baseline;gap:9px;padding-bottom:9px}
+.brand h1{margin:0;font-size:15px;font-weight:600;letter-spacing:.06em}
+.brand h1 b{color:var(--amber);font-weight:800;letter-spacing:.02em}
+.brand .ver{font-family:var(--mono);font-size:10px;color:var(--amber-dim)}
+.brand .spacer{flex:1}
+.pill{
+  font-family:var(--mono);font-size:10px;padding:3px 7px;border-radius:3px;
+  border:1px solid var(--line);color:var(--muted);
+}
+.pill.live{color:var(--buy);border-color:#1E4E43}
+.pill.demo{color:var(--amber);border-color:var(--amber-dim)}
+.pill.off{color:var(--sell);border-color:#5A2626}
+
+/* ---------- ticker strip (hero) ---------- */
+.strip{
+  display:flex;gap:0;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#131820,#0E1116);
+}
+.strip div{
+  flex:1;padding:11px 8px 12px;text-align:center;
+  border-right:1px solid var(--line);
+}
+.strip div:last-child{border-right:0}
+.strip b{display:block;font-family:var(--mono);font-size:19px;font-weight:600;line-height:1.1}
+.strip span{display:block;font-size:10.5px;color:var(--muted);margin-top:3px}
+.s-buy b{color:var(--buy)} .s-sell b{color:var(--sell)} .s-flat b{color:var(--exit)}
+
+/* ---------- tabs ---------- */
+nav.tabs{display:flex;padding:0 6px;gap:2px}
+nav.tabs button{
+  padding:11px 12px 9px;font-size:13.5px;color:var(--muted);
+  border-bottom:2px solid transparent;
+}
+nav.tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--amber)}
+
+/* ---------- pair filter ---------- */
+.filters{display:flex;gap:6px;overflow-x:auto;padding:10px 16px;scrollbar-width:none}
+.filters::-webkit-scrollbar{display:none}
+.chip{
+  flex:0 0 auto;font-family:var(--mono);font-size:11px;padding:5px 10px;
+  border:1px solid var(--line);border-radius:14px;color:var(--muted);
+}
+.chip[aria-pressed="true"]{color:var(--ink);background:var(--amber);border-color:var(--amber);font-weight:600}
+
+/* ---------- signal row ---------- */
+main{padding:0 0 24px}
+.row{
+  display:block;position:relative;padding:13px 16px 14px 19px;
+  border-bottom:1px solid var(--line);
+}
+.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--exit)}
+.row.buy::before{background:var(--buy)}
+.row.sell::before{background:var(--sell)}
+.row.exit::before{background:var(--exit)}
+.row-top{display:flex;align-items:center;gap:9px}
+.pair{font-family:var(--mono);font-size:16px;font-weight:650;letter-spacing:-.02em}
+.act{
+  font-size:11px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:.03em;
+}
+.buy .act{background:rgba(45,212,167,.14);color:var(--buy)}
+.sell .act{background:rgba(255,92,92,.14);color:var(--sell)}
+.exit .act{background:rgba(139,150,165,.16);color:var(--exit)}
+.tf{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+.row-top .age{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+.levels{display:flex;gap:14px;margin-top:9px;flex-wrap:wrap}
+.lv{min-width:74px}
+.lv i{display:block;font-style:normal;font-size:10px;color:var(--muted);margin-bottom:1px}
+.lv b{font-family:var(--mono);font-size:13.5px;font-weight:500}
+.lv.sl b{color:var(--sell)} .lv.tp b{color:var(--buy)}
+.meta{margin-top:9px;font-size:11.5px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap}
+.meta em{font-style:normal;font-family:var(--mono);color:#A8B2BE}
+
+/* ---------- history ---------- */
+.hrow{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
+.hrow .pair{font-size:13.5px}
+.hrow .res{margin-left:auto;font-family:var(--mono);font-size:13.5px;font-weight:600}
+.win{color:var(--buy)} .loss{color:var(--sell)} .be{color:var(--exit)}
+.hmeta{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+
+/* ---------- stats ---------- */
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);margin:0 0 2px}
+.stats div{background:var(--ink);padding:13px 16px}
+.stats b{display:block;font-family:var(--mono);font-size:21px;font-weight:600;line-height:1.15}
+.stats span{font-size:11px;color:var(--muted)}
+.note{padding:12px 16px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line);line-height:1.5}
+
+/* ---------- settings ---------- */
+.form{padding:16px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px}
+.field input,.field select{
+  width:100%;padding:11px 12px;background:var(--ink2);border:1px solid var(--line);
+  border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;
+}
+.field input:focus,.field select:focus{outline:2px solid var(--amber);outline-offset:-1px}
+.field small{display:block;margin-top:5px;font-size:11px;color:var(--muted);line-height:1.5}
+.btn{
+  display:block;width:100%;padding:13px;border-radius:6px;font-weight:600;font-size:14.5px;
+  background:var(--amber);color:#1A1204;
+}
+.btn.ghost{background:none;border:1px solid var(--line);color:var(--text);font-weight:500}
+.btn+.btn{margin-top:9px}
+.toggle{display:flex;align-items:center;justify-content:space-between;
+  padding:13px 0;border-bottom:1px solid var(--line)}
+.toggle span{font-size:14px}
+.sw{width:44px;height:25px;border-radius:13px;background:var(--ink3);position:relative;flex:0 0 auto}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:19px;height:19px;border-radius:50%;
+  background:var(--muted);transition:transform .16s,background .16s}
+.sw[aria-pressed="true"]{background:var(--amber-dim)}
+.sw[aria-pressed="true"]::after{transform:translateX(19px);background:var(--amber)}
+
+/* ---------- empty / toast ---------- */
+.empty{padding:56px 28px;text-align:center;color:var(--muted);font-size:13.5px;line-height:1.6}
+.empty b{display:block;color:var(--text);font-size:15px;font-weight:600;margin-bottom:7px}
+.toast{
+  position:fixed;left:50%;bottom:calc(var(--bar) + 18px);transform:translate(-50%,14px);
+  background:var(--ink3);border:1px solid var(--line);padding:10px 16px;border-radius:6px;
+  font-size:13px;opacity:0;pointer-events:none;transition:.2s;z-index:60;max-width:88vw;
+}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* ---------- bottom bar ---------- */
+.bottom{
+  position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--ink2);
+  border-top:1px solid var(--line);display:flex;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.bottom button{flex:1;padding:9px 0 8px;font-size:10.5px;color:var(--muted);text-align:center}
+.bottom button[aria-selected="true"]{color:var(--amber)}
+.bottom svg{display:block;margin:0 auto 3px;width:21px;height:21px;
+  fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- disclaimer gate ---------- */
+.gate{position:fixed;inset:0;z-index:100;background:rgba(6,8,11,.94);
+  display:flex;align-items:flex-end;padding:0}
+.gate.hide{display:none}
+.gate-in{background:var(--ink2);border-top:2px solid var(--amber);width:100%;
+  max-height:88vh;overflow-y:auto;padding:22px 20px calc(22px + env(safe-area-inset-bottom))}
+.gate-in h2{margin:0 0 4px;font-size:18px;font-weight:650}
+.gate-in p{font-size:13px;line-height:1.6;color:#C3CBD5;margin:11px 0}
+.gate-in p.hard{color:var(--text);border-left:2px solid var(--sell);padding-left:11px}
+.foot{padding:16px;font-size:11px;color:var(--muted);text-align:center;line-height:1.6}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1><b>AMC</b> SIGNAL PRO</h1>
+    <span class="ver">v1.01</span>
+    <span class="spacer"></span>
+    <span class="pill" id="srcPill">—</span>
+  </div>
+  <div class="strip">
+    <div class="s-buy"><b class="num" id="cBuy">0</b><span>Buy open</span></div>
+    <div class="s-sell"><b class="num" id="cSell">0</b><span>Sell open</span></div>
+    <div class="s-flat"><b class="num" id="cFlat">0</b><span>Flat</span></div>
+    <div><b class="num" id="cAge">—</b><span>Last update</span></div>
+  </div>
+  <nav class="tabs" id="tabs" role="tablist">
+    <button role="tab" data-tab="live" aria-selected="true">Live</button>
+    <button role="tab" data-tab="history" aria-selected="false">History</button>
+    <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+  </nav>
+</header>
+
+<main>
+  <!-- LIVE -->
+  <section id="v-live">
+    <div class="filters" id="filters"></div>
+    <div id="liveList"></div>
+  </section>
+
+  <!-- HISTORY -->
+  <section id="v-history" hidden>
+    <div class="stats">
+      <div><b class="num" id="sTrades">0</b><span>Closed trades</span></div>
+      <div><b class="num" id="sWin">—</b><span>Win rate</span></div>
+      <div><b class="num" id="sPF">—</b><span>Profit factor</span></div>
+      <div><b class="num" id="sExp">—</b><span>Expectancy (R)</span></div>
+    </div>
+    <p class="note">Win rate alone doesn't tell you if a system makes money. Profit factor above 1.2 and positive expectancy matter more. Under 100 closed trades, treat every number here as noise.</p>
+    <div id="histList"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="v-settings" hidden>
+    <div class="form">
+      <div class="field">
+        <label for="fUrl">Firebase database URL</label>
+        <input id="fUrl" type="url" placeholder="https://your-project.firebaseio.com" autocomplete="off" spellcheck="false">
+        <small>Saved on this device only. Never committed to the repo.</small>
+      </div>
+      <div class="field">
+        <label for="fTok">Database secret or ID token</label>
+        <input id="fTok" type="password" placeholder="optional" autocomplete="off">
+        <small>Leave blank if your database read rules are public.</small>
+      </div>
+      <div class="field">
+        <label for="fRefresh">Auto refresh</label>
+        <select id="fRefresh">
+          <option value="0">Off</option>
+          <option value="30">Every 30 seconds</option>
+          <option value="60" selected>Every 60 seconds</option>
+          <option value="300">Every 5 minutes</option>
+        </select>
+      </div>
+
+      <div class="toggle">
+        <span>Demo mode</span>
+        <button class="sw" id="tDemo" aria-pressed="true" aria-label="Demo mode"></button>
+      </div>
+      <p class="note" style="border:0;padding:10px 0 4px">Demo mode generates fake signals on this device so you can test the app before the signal engine is connected. Nothing here is tradeable.</p>
+
+      <div class="toggle">
+        <span>Alert on new signal</span>
+        <button class="sw" id="tNotify" aria-pressed="false" aria-label="Notifications"></button>
+      </div>
+
+      <div style="height:18px"></div>
+      <button class="btn" id="bSave">Save settings</button>
+      <button class="btn ghost" id="bTest">Test connection</button>
+      <button class="btn ghost" id="bInstall" hidden>Install app</button>
+      <button class="btn ghost" id="bClear">Clear cached data</button>
+      <p class="foot" style="padding:20px 0 0">
+        AMC SIGNAL PRO v1.01 &middot; build 2026-09-19<br>
+        Informational only. Not financial advice.
+      </p>
+    </div>
+  </section>
+</main>
+
+<div class="bottom" id="bottom">
+  <button data-tab="live" aria-selected="true">
+    <svg viewBox="0 0 24 24"><path d="M3 15l4-6 4 4 4-8 6 10"/></svg>Live</button>
+  <button data-tab="history" aria-selected="false">
+    <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/></svg>History</button>
+  <button data-tab="settings" aria-selected="false">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>Settings</button>
+</div>
+
+<div class="gate" id="gate">
+  <div class="gate-in">
+    <h2>Before you use this app</h2>
+    <p class="hard">Trading forex and CFDs carries a high level of risk and can result in the loss of all your capital. A large majority of retail accounts lose money.</p>
+    <p>AMC SIGNAL PRO shows information only. It is not investment advice, not a recommendation, and not a solicitation to buy or sell anything. Every trading decision is yours.</p>
+    <p>The developer is not a registered investment adviser and is not registered with SEBI, FCA, ASIC or any other regulator.</p>
+    <p>No claim is made that this app will produce profits. Past performance, including any backtest shown, does not indicate future results.</p>
+    <button class="btn" id="bAccept" style="margin-top:8px">I understand and accept</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const VERSION = 'v1.01';
+const PAIRS = ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD','USDCAD','USDCHF','NZDUSD','EURJPY','GBPJPY'];
+const LS = {
+  url:'amc.url', tok:'amc.tok', demo:'amc.demo', notify:'amc.notify',
+  refresh:'amc.refresh', gate:'amc.gate', filter:'amc.filter',
+  cacheSig:'amc.cache.sig', cacheHist:'amc.cache.hist', seen:'amc.seen'
+};
+
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const get = (k,d='') => localStorage.getItem(k) ?? d;
+const set = (k,v) => localStorage.setItem(k,v);
+
+let state = { signals:{}, history:[], filter:get(LS.filter,'ALL'), timer:null, lastSync:0 };
+
+/* ---------------- helpers ---------------- */
+function digits(pair){ return pair.includes('JPY') ? 3 : (pair.startsWith('XAU') ? 2 : 5); }
+function fmt(pair,v){ return (v==null||isNaN(v)) ? '—' : Number(v).toFixed(digits(pair)); }
+function ago(ts){
+  if(!ts) return '—';
+  const s = Math.max(0, Math.floor(Date.now()/1000 - ts));
+  if(s < 60)    return s + 's';
+  if(s < 3600)  return Math.floor(s/60) + 'm';
+  if(s < 86400) return Math.floor(s/3600) + 'h';
+  return Math.floor(s/86400) + 'd';
+}
+function rr(s){
+  if(!s || s.action==='EXIT') return null;
+  const risk = Math.abs(s.entry - s.sl), rew = Math.abs(s.tp - s.entry);
+  if(!risk || !rew) return null;
+  return (rew/risk).toFixed(2);
+}
+function el_notifyFail(m){ $('#tNotify').setAttribute('aria-pressed','false'); set(LS.notify,'0'); toast(m); }
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('on'), 2400);
+}
+
+/* ---------------- rendering ---------------- */
+function renderFilters(){
+  const wrap = $('#filters');
+  const list = ['ALL', ...PAIRS];
+  wrap.innerHTML = list.map(p =>
+    `<button class="chip" data-p="${p}" aria-pressed="${state.filter===p}">${p}</button>`).join('');
+  wrap.onclick = e => {
+    const b = e.target.closest('.chip'); if(!b) return;
+    state.filter = b.dataset.p; set(LS.filter, state.filter);
+    renderFilters(); renderLive();
+  };
+}
+
+function renderLive(){
+  const all = Object.entries(state.signals)
+    .map(([pair,s]) => ({pair, ...s}))
+    .filter(s => state.filter==='ALL' || s.pair===state.filter)
+    .sort((a,b) => (b.ts||0) - (a.ts||0));
+
+  let buy=0, sell=0, flat=0;
+  Object.values(state.signals).forEach(s=>{
+    if(s.action==='BUY') buy++; else if(s.action==='SELL') sell++; else flat++;
+  });
+  $('#cBuy').textContent = buy;
+  $('#cSell').textContent = sell;
+  $('#cFlat').textContent = flat;
+  $('#cAge').textContent = state.lastSync ? ago(state.lastSync) : '—';
+
+  const box = $('#liveList');
+  if(!all.length){
+    box.innerHTML = `<div class="empty"><b>No signals yet</b>
+      Connect your signal engine in Settings, or switch Demo mode on to see how the feed looks.</div>`;
+    return;
+  }
+  box.innerHTML = all.map(s => {
+    const cls = (s.action||'EXIT').toLowerCase();
+    const ratio = rr(s);
+    const levels = s.action === 'EXIT'
+      ? `<div class="lv"><i>Close at</i><b class="num">${fmt(s.pair, s.entry)}</b></div>`
+      : `<div class="lv"><i>Entry</i><b class="num">${fmt(s.pair, s.entry)}</b></div>
+         <div class="lv sl"><i>Stop loss</i><b class="num">${fmt(s.pair, s.sl)}</b></div>
+         <div class="lv tp"><i>Take profit</i><b class="num">${fmt(s.pair, s.tp)}</b></div>
+         ${ratio ? `<div class="lv"><i>Risk / reward</i><b class="num">1 : ${ratio}</b></div>` : ''}`;
+    return `<article class="row ${cls}">
+      <div class="row-top">
+        <span class="pair">${s.pair}</span>
+        <span class="act">${s.action}</span>
+        <span class="tf">${s.tf || 'H1'}</span>
+        <span class="age">${ago(s.ts)} ago</span>
+      </div>
+      <div class="levels">${levels}</div>
+      <div class="meta">
+        ${s.atr ? `<span>ATR <em>${fmt(s.pair, s.atr)}</em></span>` : ''}
+        ${s.spread!=null ? `<span>Spread <em>${s.spread}</em> pts</span>` : ''}
+        ${s.note ? `<span>${s.note}</span>` : ''}
+      </div>
+    </article>`;
+  }).join('');
+}
+
+function renderHistory(){
+  const h = state.history;
+  const box = $('#histList');
+  if(!h.length){
+    box.innerHTML = `<div class="empty"><b>No closed trades</b>
+      Once your engine publishes results to /history, they show up here with win rate and profit factor.</div>`;
+    $('#sTrades').textContent='0'; $('#sWin').textContent='—';
+    $('#sPF').textContent='—'; $('#sExp').textContent='—';
+    return;
+  }
+  const wins = h.filter(t => t.r > 0), losses = h.filter(t => t.r < 0);
+  const gp = wins.reduce((a,t)=>a+t.r, 0);
+  const gl = Math.abs(losses.reduce((a,t)=>a+t.r, 0));
+  $('#sTrades').textContent = h.length;
+  $('#sWin').textContent = (wins.length / h.length * 100).toFixed(1) + '%';
+  $('#sPF').textContent = gl ? (gp/gl).toFixed(2) : '∞';
+  $('#sExp').textContent = (h.reduce((a,t)=>a+t.r, 0) / h.length).toFixed(2) + 'R';
+
+  box.innerHTML = h.map(t => {
+    const cls = t.r > 0 ? 'win' : (t.r < 0 ? 'loss' : 'be');
+    const d = t.closeTs ? new Date(t.closeTs*1000).toLocaleDateString('en-GB',
+                {day:'2-digit',month:'short'}) : '';
+    return `<div class="hrow">
+      <span class="pair num">${t.pair}</span>
+      <span class="hmeta">${t.action} &middot; ${d}</span>
+      <span class="res ${cls}">${t.r > 0 ? '+' : ''}${Number(t.r).toFixed(2)}R</span>
+    </div>`;
+  }).join('');
+}
+
+/* ---------------- data ---------------- */
+async function fbGet(path){
+  const url = get(LS.url).replace(/\/+$/,'');
+  if(!url) throw new Error('No database URL set');
+  const tok = get(LS.tok);
+  const q = tok ? `?auth=${encodeURIComponent(tok)}` : '';
+  const res = await fetch(`${url}/${path}.json${q}`, {cache:'no-store'});
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function demoData(){
+  // Deterministic-ish fake feed so the UI is testable without an engine.
+  const base = {XAUUSD:3410.50,EURUSD:1.0865,GBPUSD:1.2710,USDJPY:151.40,AUDUSD:0.6605,
+                USDCAD:1.3620,USDCHF:0.8815,NZDUSD:0.6010,EURJPY:164.50,GBPJPY:192.30};
+  const acts = ['BUY','SELL','EXIT','FLAT'];
+  const sigs = {};
+  const slot = Math.floor(Date.now()/900000);          // rotates every 15 min
+  PAIRS.forEach((p,i) => {
+    const a = acts[(slot + i*3) % 4];
+    if(a === 'FLAT') return;
+    const px = base[p], d = digits(p);
+    const atr = p.startsWith('XAU') ? 6.4 : (p.includes('JPY') ? 0.42 : 0.0038);
+    const dir = a === 'SELL' ? -1 : 1;
+    sigs[p] = {
+      action: a,
+      entry: +px.toFixed(d),
+      sl: a==='EXIT' ? null : +(px - dir*1.5*atr).toFixed(d),
+      tp: a==='EXIT' ? null : +(px + dir*2.5*atr).toFixed(d),
+      ts: Math.floor(Date.now()/1000) - ((slot + i) % 7) * 900,
+      tf: 'H1', atr:+atr.toFixed(d),
+      spread: p.startsWith('XAU') ? 28 : 9,
+      note: 'demo'
+    };
+  });
+  const hist = [];
+  for(let i=0;i<24;i++){
+    const p = PAIRS[i % PAIRS.length];
+    const win = (i*7 % 10) < 5;                        // ~50% win rate, honest
+    hist.push({
+      pair:p, action: i%2 ? 'BUY':'SELL',
+      r: win ? +(1.2 + (i%4)*0.35).toFixed(2) : -1,
+      closeTs: Math.floor(Date.now()/1000) - i*86400
+    });
+  }
+  return {sigs, hist};
+}
+
+async function sync(silent){
+  const demo = get(LS.demo,'1') === '1';
+  $('#srcPill').className = 'pill ' + (demo ? 'demo' : 'live');
+  $('#srcPill').textContent = demo ? 'DEMO' : 'LIVE';
+
+  if(demo){
+    const d = demoData();
+    state.signals = d.sigs; state.history = d.hist;
+    state.lastSync = Math.floor(Date.now()/1000);
+    renderLive(); renderHistory();
+    if(!silent) toast('Demo feed refreshed');
+    return;
+  }
+  try{
+    const [sig, hist] = await Promise.all([
+      fbGet('signals').catch(()=>null),
+      fbGet('history').catch(()=>null)
+    ]);
+    state.signals = sig || {};
+    state.history = hist ? Object.values(hist).sort((a,b)=>(b.closeTs||0)-(a.closeTs||0)) : [];
+    state.lastSync = Math.floor(Date.now()/1000);
+    set(LS.cacheSig, JSON.stringify(state.signals));
+    set(LS.cacheHist, JSON.stringify(state.history));
+    notifyNew(state.signals);
+    renderLive(); renderHistory();
+    if(!silent) toast('Signals updated');
+  }catch(err){
+    $('#srcPill').className = 'pill off';
+    $('#srcPill').textContent = 'OFFLINE';
+    const c = get(LS.cacheSig); if(c) state.signals = JSON.parse(c);
+    const h = get(LS.cacheHist); if(h) state.history = JSON.parse(h);
+    renderLive(); renderHistory();
+    if(!silent) toast('Could not reach the database. Showing last saved signals.');
+  }
+}
+
+const canNotify = () => typeof Notification !== 'undefined';
+function notifyNew(sigs){
+  if(get(LS.notify) !== '1' || !canNotify() || Notification.permission !== 'granted') return;
+  const seen = JSON.parse(get(LS.seen,'{}'));
+  const next = {};
+  Object.entries(sigs).forEach(([p,s]) => {
+    next[p] = s.ts;
+    if(seen[p] !== s.ts && s.action !== 'EXIT'){
+      new Notification(`${s.action}  ${p}`, {
+        body:`Entry ${fmt(p,s.entry)} · SL ${fmt(p,s.sl)} · TP ${fmt(p,s.tp)}`,
+        tag:p, icon:'icons/icon-192.png'
+      });
+    }
+  });
+  set(LS.seen, JSON.stringify(next));
+}
+
+function startTimer(){
+  clearInterval(state.timer);
+  const secs = parseInt(get(LS.refresh,'60'), 10);
+  if(secs > 0) state.timer = setInterval(()=>sync(true), secs*1000);
+}
+
+/* ---------------- tabs ---------------- */
+function showTab(name){
+  ['live','history','settings'].forEach(t => $('#v-'+t).hidden = (t !== name));
+  $$('#tabs button, #bottom button').forEach(b =>
+    b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+  window.scrollTo({top:0});
+}
+$('#tabs').onclick = $('#bottom').onclick = e => {
+  const b = e.target.closest('button[data-tab]'); if(b) showTab(b.dataset.tab);
+};
+
+/* ---------------- settings wiring ---------------- */
+function bindSwitch(el, key, onChange){
+  el.setAttribute('aria-pressed', get(key, key===LS.demo?'1':'0') === '1');
+  el.onclick = async () => {
+    const next = el.getAttribute('aria-pressed') !== 'true';
+    el.setAttribute('aria-pressed', String(next));
+    set(key, next ? '1' : '0');
+    if(onChange) await onChange(next);
+  };
+}
+
+$('#fUrl').value = get(LS.url);
+$('#fTok').value = get(LS.tok);
+$('#fRefresh').value = get(LS.refresh,'60');
+
+bindSwitch($('#tDemo'), LS.demo, () => sync());
+bindSwitch($('#tNotify'), LS.notify, async on => {
+  if(on && !canNotify()){
+    el_notifyFail('This browser does not support notifications.'); return;
+  }
+  if(on && Notification.permission !== 'granted'){
+    const p = await Notification.requestPermission();
+    if(p !== 'granted'){
+      $('#tNotify').setAttribute('aria-pressed','false');
+      set(LS.notify,'0');
+      toast('Notifications are blocked in your browser settings.');
+    }
+  }
+});
+
+$('#bSave').onclick = () => {
+  set(LS.url, $('#fUrl').value.trim());
+  set(LS.tok, $('#fTok').value.trim());
+  set(LS.refresh, $('#fRefresh').value);
+  startTimer(); sync();
+  toast('Settings saved');
+};
+
+$('#bTest').onclick = async () => {
+  set(LS.url, $('#fUrl').value.trim());
+  set(LS.tok, $('#fTok').value.trim());
+  if(!get(LS.url)) return toast('Enter your database URL first.');
+  try{
+    const d = await fbGet('signals');
+    toast(d ? `Connected. ${Object.keys(d).length} pairs found.` : 'Connected, but /signals is empty.');
+  }catch(err){
+    toast('Connection failed: ' + err.message);
+  }
+};
+
+$('#bClear').onclick = () => {
+  [LS.cacheSig, LS.cacheHist, LS.seen].forEach(k => localStorage.removeItem(k));
+  toast('Cached data cleared');
+};
+
+/* ---------------- install prompt ---------------- */
+let deferred = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault(); deferred = e; $('#bInstall').hidden = false;
+});
+$('#bInstall').onclick = async () => {
+  if(!deferred) return;
+  deferred.prompt(); await deferred.userChoice;
+  deferred = null; $('#bInstall').hidden = true;
+};
+
+/* ---------------- disclaimer gate ---------------- */
+if(get(LS.gate) === VERSION) $('#gate').classList.add('hide');
+$('#bAccept').onclick = () => { set(LS.gate, VERSION); $('#gate').classList.add('hide'); };
+
+/* ---------------- boot ---------------- */
+renderFilters();
+sync(true);
+startTimer();
+document.addEventListener('visibilitychange', () => { if(!document.hidden) sync(true); });
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>

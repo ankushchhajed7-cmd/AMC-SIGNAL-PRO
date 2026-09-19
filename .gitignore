@@ -1,0 +1,47 @@
+# ── Secrets — never commit ────────────────────────────
+app/config.js
+.env
+.env.*
+*.key
+*.pem
+firebase-adminsdk*.json
+google-services.json
+
+# ── Android signing — back these up OUTSIDE the repo ──
+*.keystore
+*.jks
+keystore-password.txt
+signing-key-info.txt
+
+# ── PWABuilder output ─────────────────────────────────
+*.apk
+*.aab
+pwabuilder-*/
+android-package/
+
+# ── MT5 / MQL5 build artifacts (Phase 2) ──────────────
+*.ex5
+*.ex4
+engine/Files/
+engine/Logs/
+engine/Presets/*.bak
+
+# ── Backtest data (too large for git) ─────────────────
+backtest/data/*.csv
+backtest/cache/
+backtest/reports/*.htm
+backtest/reports/*.html
+
+# ── Python ────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# ── OS / editor ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
