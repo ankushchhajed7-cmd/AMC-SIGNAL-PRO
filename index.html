@@ -2,10 +2,24 @@
 <!--
 =====================================================================
   AMC SIGNAL PRO  —  Forex Signal PWA
-  Version: v1.05
+  Version: v1.07
   Build   : 2026-09-19
 ---------------------------------------------------------------------
   CHANGELOG
+  v1.07  Forward tracking, counts grid and a virtual account.
+         - History defaults to "Since <date>" — only trades that
+           closed after you started tracking. Toggle to see the full
+           simulated window when you want the bigger sample.
+         - "Start fresh from today" button in Settings.
+         - Counts grid: open now, closed, TP hit, SL hit, bias flip,
+           time stop — each with the money it produced.
+         - Virtual account computed on the device from R results:
+           starting balance (default 500), risk % per trade, and a
+           cost-per-trade haircut for spread and commission.
+  v1.06  Exit breakdown. History now counts how every trade ended —
+         TP, SL, bias flip, time stop — with the share of trades and
+         the money or R each bucket produced. Works on both the
+         Firebase engine and the on-device Twelve Data engine.
   v1.05  Paper account panel. When the Firebase engine is publishing a
          virtual account at /paper/account, the History tab shows
          balance, equity, floating P&L, net profit and max drawdown,
@@ -140,6 +154,25 @@ main{padding:0 0 24px}
 .paper .grid div b{font-family:var(--mono);font-size:13.5px;font-weight:500}
 .up{color:var(--buy)} .down{color:var(--sell)}
 .hrow .cash{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:62px;text-align:right}
+.seg{display:flex;gap:0;margin:12px 16px 0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{flex:1;padding:8px 6px;font-size:12px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--ink3);color:var(--text);font-weight:600}
+.cgrid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.cgrid div{background:var(--ink);padding:11px 16px 12px}
+.cgrid b{display:block;font-family:var(--mono);font-size:20px;font-weight:600;line-height:1.15}
+.cgrid i{display:block;font-style:normal;font-size:11px;color:var(--muted);margin-top:1px}
+.cgrid u{display:block;text-decoration:none;font-family:var(--mono);font-size:11px;margin-top:3px}
+.exits{border-bottom:1px solid var(--line);padding:13px 16px 14px}
+.exits h3{margin:0 0 10px;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.04em}
+.erow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.erow:last-child{margin-bottom:0}
+.erow .lbl{font-size:12.5px;min-width:76px}
+.erow .track{flex:1;height:6px;background:var(--ink3);border-radius:3px;overflow:hidden}
+.erow .track i{display:block;height:100%;border-radius:3px}
+.erow .cnt{font-family:var(--mono);font-size:12px;min-width:34px;text-align:right}
+.erow .pct{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:38px;text-align:right}
+.erow .sum{font-family:var(--mono);font-size:11.5px;min-width:62px;text-align:right}
 .note{padding:12px 16px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line);line-height:1.5}
 
 .form{padding:16px}
@@ -198,7 +231,7 @@ main{padding:0 0 24px}
 <header>
   <div class="brand">
     <h1><b>AMC</b> SIGNAL PRO</h1>
-    <span class="ver">v1.05</span>
+    <span class="ver">v1.07</span>
     <span class="spacer"></span>
     <span class="pill" id="srcPill">—</span>
   </div>
@@ -223,7 +256,12 @@ main{padding:0 0 24px}
   </section>
 
   <section id="v-history" hidden>
+    <div class="seg" id="histSeg">
+      <button data-w="since" aria-pressed="true">Since tracking start</button>
+      <button data-w="all" aria-pressed="false">Full window</button>
+    </div>
     <div id="paperBox"></div>
+    <div id="countBox"></div>
     <div class="stats">
       <div><b class="num" id="sTrades">0</b><span>Closed trades</span></div>
       <div><b class="num" id="sWin">—</b><span>Win rate</span></div>
@@ -274,6 +312,21 @@ main{padding:0 0 24px}
       </div>
 
       <div class="field">
+        <label for="fBal">Virtual starting balance</label>
+        <input id="fBal" type="number" step="10" min="10" value="500" autocomplete="off">
+        <small>Paper only. Nothing here touches a real account.</small>
+      </div>
+      <div class="field">
+        <label for="fRisk">Risk per trade (% of virtual balance)</label>
+        <input id="fRisk" type="number" step="0.1" min="0.1" max="10" value="1" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="fCost">Cost per trade (R)</label>
+        <input id="fCost" type="number" step="0.01" min="0" max="1" value="0.10" autocomplete="off">
+        <small>Subtracted from every trade's result to stand in for spread, commission and slippage. 0.10 is realistic on majors; gold at a wide spread needs more.</small>
+      </div>
+
+      <div class="field">
         <label for="fRefresh">Auto refresh</label>
         <select id="fRefresh">
           <option value="0">Off</option>
@@ -293,9 +346,10 @@ main{padding:0 0 24px}
       <button class="btn" id="bSave">Save settings</button>
       <button class="btn ghost" id="bTest">Test connection</button>
       <button class="btn ghost" id="bInstall" hidden>Install app</button>
+      <button class="btn ghost" id="bFresh">Start fresh from today</button>
       <button class="btn ghost" id="bClear">Clear cached candles</button>
       <p class="foot" style="padding:20px 0 0">
-        AMC SIGNAL PRO v1.05 &middot; build 2026-09-19<br>
+        AMC SIGNAL PRO v1.07 &middot; build 2026-09-19<br>
         Informational only. Not financial advice.
       </p>
     </div>
@@ -326,14 +380,16 @@ main{padding:0 0 24px}
 
 <script>
 'use strict';
-const VERSION = 'v1.05';
+const VERSION = 'v1.07';
 const DEFAULT_PAIRS = ['XAUUSD','EURUSD','GBPUSD','USDJPY','AUDUSD'];
 const LS = {
   src:'amc.src', key:'amc.key', pairs:'amc.pairs',
   url:'amc.url', tok:'amc.tok', notify:'amc.notify', refresh:'amc.refresh',
   gate:'amc.gate', filter:'amc.filter', credits:'amc.credits',
   cacheSig:'amc.cache.sig', cacheHist:'amc.cache.hist', cachePaper:'amc.cache.paper',
-  bars:'amc.bars.', seen:'amc.seen'
+  bars:'amc.bars.', seen:'amc.seen',
+  vBal:'amc.v.bal', vRisk:'amc.v.risk', vCost:'amc.v.cost',
+  trackFrom:'amc.track.from', histWin:'amc.hist.win'
 };
 
 /* ---- engine parameters ---- */
@@ -843,58 +899,147 @@ function renderLive(){
       + '</div></article>';
   }).join('');
 }
+function trackFrom(){
+  let t = parseInt(get(LS.trackFrom,'0'), 10);
+  if(!t){
+    const d = new Date(); d.setHours(0,0,0,0);
+    t = Math.floor(d.getTime()/1000);
+    set(LS.trackFrom, String(t));
+  }
+  return t;
+}
+function trackLabel(){
+  return new Date(trackFrom()*1000)
+    .toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+}
+function histWindow(){ return get(LS.histWin,'since'); }
+function windowedHistory(){
+  const h = [...state.history].sort((a,b)=>(b.closeTs||0)-(a.closeTs||0));
+  if(histWindow() === 'all') return h;
+  const t = trackFrom();
+  return h.filter(x => (x.closeTs||0) >= t);
+}
+// Virtual account from R results. No broker tick values needed:
+// risk a fixed % of the running balance, take r minus a cost haircut.
+function computePaper(list){
+  const start = Math.max(1, parseFloat(get(LS.vBal,'500')) || 500);
+  const riskP = Math.max(0.1, parseFloat(get(LS.vRisk,'1')) || 1);
+  const cost  = Math.max(0, parseFloat(get(LS.vCost,'0.10')) || 0);
+  const asc = [...list].sort((a,b)=>(a.closeTs||0)-(b.closeTs||0));
+  let bal = start, peak = start, maxDD = 0;
+  const rows = [];
+  for(const t of asc){
+    const risk = bal * riskP / 100;
+    const netR = Number(t.r||0) - cost;
+    const pnl  = netR * risk;
+    bal += pnl;
+    if(bal > peak) peak = bal;
+    const dd = peak > 0 ? (peak - bal)/peak*100 : 0;
+    if(dd > maxDD) maxDD = dd;
+    rows.push(Object.assign({}, t, {pnl: pnl, netR: netR, bal: bal}));
+  }
+  rows.reverse();
+  return {start, balance: bal, peak, maxDD, riskP, cost, rows};
+}
 function money(v, cur){
   if(v==null || isNaN(v)) return '—';
   const n = Number(v);
   return (n>0?'+':'') + n.toFixed(2) + (cur ? ' ' + cur : '');
 }
-function renderPaper(){
-  const p = state.paper, box = $('#paperBox');
-  if(!p || p.balance==null){ box.innerHTML = ''; return; }
-  const cur  = p.currency || '';
-  const eq   = Number(p.equity != null ? p.equity : p.balance);
-  const net  = Number(p.netProfit != null ? p.netProfit : (eq - p.startBalance));
-  const flo  = Number(p.floating || 0);
-  const cls  = net >= 0 ? 'up' : 'down';
+function renderPaper(acc, n){
+  const box = $('#paperBox');
+  if(!n){ box.innerHTML = ''; return; }
+  const net = acc.balance - acc.start;
+  const cls = net >= 0 ? 'up' : 'down';
+  const pct = (net / acc.start * 100);
   box.innerHTML = '<div class="paper">'
-    + '<div class="eq"><b class="'+cls+'">' + eq.toFixed(2) + '</b>'
-    + '<u class="'+cls+'">' + money(net, cur) + '</u>'
-    + '<s>paper account, started at ' + Number(p.startBalance).toFixed(0) + '</s></div>'
+    + '<div class="eq"><b class="'+cls+'">' + acc.balance.toFixed(2) + '</b>'
+    + '<u class="'+cls+'">' + (net>=0?'+':'') + net.toFixed(2)
+    + ' (' + (pct>=0?'+':'') + pct.toFixed(1) + '%)</u>'
+    + '<s>virtual, started at ' + acc.start.toFixed(0) + '</s></div>'
     + '<div class="grid">'
-    + '<div><i>Balance</i><b>' + Number(p.balance).toFixed(2) + '</b></div>'
-    + '<div><i>Floating</i><b class="'+(flo>=0?'up':'down')+'">' + money(flo,'') + '</b></div>'
-    + '<div><i>Open</i><b>' + (p.openTrades||0) + '</b></div>'
-    + '<div><i>Max drawdown</i><b>' + Number(p.maxDDPercent||0).toFixed(1) + '%</b></div>'
-    + '<div><i>Risk / trade</i><b>' + Number(p.riskPercent||0).toFixed(1) + '%</b></div>'
+    + '<div><i>Peak</i><b>' + acc.peak.toFixed(2) + '</b></div>'
+    + '<div><i>Max drawdown</i><b>' + acc.maxDD.toFixed(1) + '%</b></div>'
+    + '<div><i>Risk / trade</i><b>' + acc.riskP.toFixed(1) + '%</b></div>'
+    + '<div><i>Cost / trade</i><b>' + acc.cost.toFixed(2) + 'R</b></div>'
     + '</div></div>';
 }
+
+const EXIT_KINDS = [
+  {key:'TP',        label:'Take profit hit'},
+  {key:'SL',        label:'Stop loss hit'},
+  {key:'Bias flip', label:'Bias flip'},
+  {key:'Time stop', label:'Time stop'}
+];
+function renderCounts(acc, list){
+  const box = $('#countBox');
+  let open = 0;
+  Object.values(state.signals).forEach(x => {
+    if(x.action === 'BUY' || x.action === 'SELL') open++;
+  });
+
+  const cell = (val, label, sum, cls) =>
+      '<div><b' + (cls ? ' class="'+cls+'"' : '') + '>' + val + '</b>'
+    + '<i>' + label + '</i>'
+    + (sum === null ? '' : '<u class="' + (sum >= 0 ? 'up':'down') + '">'
+        + (sum>=0?'+':'') + sum.toFixed(2) + '</u>')
+    + '</div>';
+
+  let html = cell(open, 'Open right now', null, '')
+           + cell(list.length, 'Closed ' + (histWindow()==='all' ? 'in window' : 'since ' + trackLabel()), null, '');
+
+  EXIT_KINDS.forEach(k => {
+    const hit = acc.rows.filter(t => t.reason === k.key);
+    const sum = hit.reduce((a,t)=>a+t.pnl, 0);
+    const cls = k.key==='TP' ? 'up' : (k.key==='SL' ? 'down' : '');
+    html += cell(hit.length, k.label, hit.length ? sum : null, cls);
+  });
+
+  const other = list.length - EXIT_KINDS.reduce(
+    (a,k)=>a + list.filter(t=>t.reason===k.key).length, 0);
+  if(other > 0) html += cell(other, 'Untagged', null, '');
+
+  box.innerHTML = '<div class="cgrid">' + html + '</div>';
+}
+
 function renderHistory(){
-  renderPaper();
-  const h = state.history, box = $('#histList');
-  if(!h.length){
-    box.innerHTML = '<div class="empty"><b>No closed trades</b>'
-      + 'Run a scan and the closed trades from the downloaded window appear here.</div>';
+  const list = windowedHistory();
+  const acc  = computePaper(list);
+  const box  = $('#histList');
+
+  renderPaper(acc, list.length);
+  renderCounts(acc, list);
+
+  if(!list.length){
+    box.innerHTML = '<div class="empty"><b>Nothing closed yet</b>'
+      + (histWindow()==='since'
+         ? 'Tracking started ' + trackLabel() + '. Trades that close from now on appear here. '
+           + 'Tap "Full window" above to see the simulated history instead.'
+         : 'Run a scan and closed trades appear here.') + '</div>';
     $('#sTrades').textContent='0'; $('#sWin').textContent='—';
     $('#sPF').textContent='—'; $('#sExp').textContent='—';
     return;
   }
-  const wins = h.filter(t => t.r > 0), losses = h.filter(t => t.r < 0);
-  const gp = wins.reduce((a,t)=>a+t.r,0), gl = Math.abs(losses.reduce((a,t)=>a+t.r,0));
-  $('#sTrades').textContent = h.length;
-  $('#sWin').textContent = (wins.length/h.length*100).toFixed(1) + '%';
-  $('#sPF').textContent = gl ? (gp/gl).toFixed(2) : '∞';
-  $('#sExp').textContent = (h.reduce((a,t)=>a+t.r,0)/h.length).toFixed(2) + 'R';
 
-  box.innerHTML = h.slice(0,120).map(t => {
-    const cls = t.r > 0 ? 'win' : (t.r < 0 ? 'loss' : 'be');
+  const rows   = acc.rows;
+  const wins   = rows.filter(t => t.netR > 0);
+  const losses = rows.filter(t => t.netR < 0);
+  const gp = wins.reduce((a,t)=>a+t.netR,0);
+  const gl = Math.abs(losses.reduce((a,t)=>a+t.netR,0));
+  $('#sTrades').textContent = rows.length;
+  $('#sWin').textContent = (wins.length/rows.length*100).toFixed(1) + '%';
+  $('#sPF').textContent = gl ? (gp/gl).toFixed(2) : '∞';
+  $('#sExp').textContent = (rows.reduce((a,t)=>a+t.netR,0)/rows.length).toFixed(2) + 'R';
+
+  box.innerHTML = rows.slice(0,150).map(t => {
+    const cls = t.netR > 0 ? 'win' : (t.netR < 0 ? 'loss' : 'be');
     const d = t.closeTs ? new Date(t.closeTs*1000)
                 .toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) : '';
-    const cash = (t.pnl!=null && !isNaN(t.pnl))
-      ? '<span class="cash">'+(t.pnl>0?'+':'')+Number(t.pnl).toFixed(2)+'</span>' : '';
     return '<div class="hrow"><span class="pair num">'+t.pair+'</span>'
       + '<span class="hmeta">'+t.action+' &middot; '+d+(t.reason? ' &middot; '+t.reason:'')+'</span>'
-      + cash
-      + '<span class="res '+cls+'">'+(t.r>0?'+':'')+Number(t.r).toFixed(2)+'R</span></div>';
+      + '<span class="cash ' + (t.pnl>=0?'up':'down') + '">'
+      + (t.pnl>0?'+':'') + t.pnl.toFixed(2) + '</span>'
+      + '<span class="res '+cls+'">'+(t.netR>0?'+':'')+t.netR.toFixed(2)+'R</span></div>';
   }).join('');
 }
 
@@ -916,6 +1061,18 @@ function notifyNew(sigs){
   });
   set(LS.seen, JSON.stringify(next));
 }
+
+/* ================= history window toggle ================= */
+function paintSeg(){
+  $$('#histSeg button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.w === histWindow())));
+  $('#histSeg button[data-w="since"]').textContent = 'Since ' + trackLabel();
+}
+$('#histSeg').onclick = e => {
+  const b = e.target.closest('button[data-w]'); if(!b) return;
+  set(LS.histWin, b.dataset.w);
+  paintSeg(); renderHistory();
+};
 
 /* ================= tabs ================= */
 function showTab(name){
@@ -940,6 +1097,9 @@ $('#fPairs').value = get(LS.pairs, DEFAULT_PAIRS.join(','));
 $('#fUrl').value   = get(LS.url);
 $('#fTok').value   = get(LS.tok);
 $('#fRefresh').value = get(LS.refresh,'3600');
+$('#fBal').value  = get(LS.vBal,'500');
+$('#fRisk').value = get(LS.vRisk,'1');
+$('#fCost').value = get(LS.vCost,'0.10');
 showSrcFields();
 $('#fSrc').onchange = showSrcFields;
 
@@ -969,6 +1129,9 @@ $('#bSave').onclick = () => {
   set(LS.url, $('#fUrl').value.trim());
   set(LS.tok, $('#fTok').value.trim());
   set(LS.refresh, $('#fRefresh').value);
+  set(LS.vBal,  $('#fBal').value);
+  set(LS.vRisk, $('#fRisk').value);
+  set(LS.vCost, $('#fCost').value);
   state.filter = 'ALL'; set(LS.filter,'ALL');
   renderFilters(); startTimer(); sync();
   toast('Settings saved');
@@ -996,6 +1159,14 @@ $('#bTest').onclick = async () => {
     if(j.code || j.status === 'error') toast('Key rejected: ' + (j.message || j.code));
     else toast('Key works. EUR/USD is at ' + j.close);
   }catch(err){ toast('Network error: ' + err.message); }
+};
+
+$('#bFresh').onclick = () => {
+  const d = new Date(); d.setHours(0,0,0,0);
+  set(LS.trackFrom, String(Math.floor(d.getTime()/1000)));
+  set(LS.histWin, 'since');
+  paintSeg(); renderHistory();
+  toast('Tracking restarted from ' + trackLabel() + '. The virtual account starts over too.');
 };
 
 $('#bClear').onclick = () => {
@@ -1026,6 +1197,7 @@ if(get(LS.gate) === VERSION) $('#gate').classList.add('hide');
 $('#bAccept').onclick = () => { set(LS.gate, VERSION); $('#gate').classList.add('hide'); };
 
 renderFilters();
+paintSeg();
 loadCache();
 renderLive(); renderHistory();
 paintCredits();
